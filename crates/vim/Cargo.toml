@@ -1,0 +1,11 @@
+[package]
+name = "intent-vim"
+description = "Modal Vim-grammar text editing engine (pure, UI-independent)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
