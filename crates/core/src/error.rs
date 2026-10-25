@@ -10,6 +10,8 @@ pub enum CoreError {
     BadDate(String),
     #[error("invalid value: {0}")]
     BadValue(String),
+    #[error("usage: {0}")]
+    Usage(String),
     #[error("database error: {0}")]
     Db(#[from] rusqlite::Error),
     #[error("io error: {0}")]
@@ -22,6 +24,7 @@ impl CoreError {
             CoreError::NotFound(_) => "not_found",
             CoreError::BadDate(_) => "bad_date",
             CoreError::BadValue(_) => "bad_value",
+            CoreError::Usage(_) => "usage",
             CoreError::Db(_) => "db",
             CoreError::Io(_) => "io",
         }
@@ -32,6 +35,7 @@ impl CoreError {
         match self {
             CoreError::NotFound(_) => 3,
             CoreError::BadDate(_) | CoreError::BadValue(_) => 4,
+            CoreError::Usage(_) => 2,
             CoreError::Db(_) | CoreError::Io(_) => 1,
         }
     }

@@ -14,3 +14,7 @@ intent-core.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 jiff.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+jiff.workspace = true
