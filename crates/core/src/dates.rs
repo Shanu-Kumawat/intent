@@ -1,5 +1,5 @@
-use jiff::civil::{Date, Weekday};
-use jiff::util::parse::ParseError;
+use jiff::civil::Weekday;
+use jiff::ToSpan;
 use std::fmt;
 
 use crate::error::{bad_value, CoreError, Result};
@@ -28,7 +28,7 @@ impl Date {
     }
 
     pub fn days_until(self, other: Date) -> i64 {
-        (other.0 - self.0).get_days()
+        (other.0 - self.0).get_days() as i64
     }
 
     pub fn weekday(self) -> Weekday {
@@ -60,8 +60,24 @@ pub fn today() -> Date {
     Date(jiff::Zoned::now().date())
 }
 
-fn parse_iso(s: &str) -> std::result::Result<Date, ParseError> {
-    s.trim().parse::<jiff::civil::Date>().map(Date)
+fn parse_iso(s: &str) -> std::result::Result<Date, jiff::Error> {
+    // Strictly YYYY-MM-DD (SPEC §1.4) — reject jiff's lenient/basic forms.
+    let s = s.trim();
+    let bytes = s.as_bytes();
+    let shaped = bytes.len() == 10
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[7] == b'-'
+        && bytes[8..].iter().all(u8::is_ascii_digit);
+    if !shaped {
+        return Err(any_jiff_error());
+    }
+    s.parse::<jiff::civil::Date>().map(Date)
+}
+
+fn any_jiff_error() -> jiff::Error {
+    "x".parse::<jiff::civil::Date>().unwrap_err()
 }
 
 fn next_weekday(from: Date, target: Weekday) -> Date {
@@ -108,19 +124,23 @@ pub fn parse_date(input: &str, today: Date) -> Result<Date> {
         _ => {}
     }
 
-    // Relative ±N[d|w|m|y]. Bare sign = 1.
+    // Relative ±N[d|w|m|y]. Bare sign = 1. Empty rest means no digits.
     if let Some(rest) = s.strip_prefix('+').or_else(|| s.strip_prefix('-')) {
         let negative = s.starts_with('-');
         let (n, unit) = match rest.chars().next() {
+            None => (1i64, 'd'),
             Some(u @ ('d' | 'w' | 'm' | 'y')) if rest.len() == 1 => (1i64, u),
             _ => {
                 let split = rest
                     .find(|c: char| c.is_ascii_alphabetic())
                     .unwrap_or(rest.len());
                 let (digits, unit) = rest.split_at(split);
-                let unit = if unit.is_empty() { 'd' } else { unit };
+                let unit = if unit.is_empty() { "d" } else { unit };
                 match (digits.parse::<i64>(), unit) {
-                    (Ok(n), u @ ('d' | 'w' | 'm' | 'y')) if unit.chars().count() == 1 => (n, u),
+                    (Ok(n), "d") => (n, 'd'),
+                    (Ok(n), "w") => (n, 'w'),
+                    (Ok(n), "m") => (n, 'm'),
+                    (Ok(n), "y") => (n, 'y'),
                     _ => return Err(CoreError::BadDate(format!("unrecognized date: {input}"))),
                 }
             }
