@@ -25,3 +25,8 @@ debug = 1
 
 [profile.release]
 opt-level = 2
+
+# gpui 0.2.2 → zed-async-tar → xattr 0.2.3 references libc::ENOATTR, removed
+# in libc 0.2.191. Vendored copy defines the constant directly (61 on Linux).
+[patch.crates-io]
+xattr = { path = "vendor/xattr" }
