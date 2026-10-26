@@ -111,7 +111,7 @@ fn capture_flow_and_undo() {
     let all = f.state.store.all_tasks().unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].title, "buy milk");
-    assert_eq!(all[0].inbox, true);
+    assert!(all[0].inbox);
     assert!(f.state.status.contains("captured"), "status names the id");
 
     // focus returned to the list at the new task (inbox view shows it)
@@ -490,36 +490,93 @@ fn command_q_closes_editor_first() {
 // ---- visual -----------------------------------------------------------------------
 
 #[test]
-fn visual_complete_multiple() {
+fn visual_complete_exact_rows() {
+    // Inbox is newest-first: rows are [c, b, a] for seed order a, b, c.
     let mut f = fx();
     let ids = seed(&mut f, &["a", "b", "c"]);
-    f.state.switch_view(TaskView::Inbox);
-    feed(&mut f, "V");
-    assert!(f.state.visual_anchor.is_some());
-    feed(&mut f, "j");
-    feed(&mut f, "x");
-    assert!(f.state.visual_anchor.is_none());
-    let done: usize = f
-        .state
-        .store
-        .all_tasks()
-        .unwrap()
-        .iter()
-        .filter(|t| t.id != ids[2] && t.status == intent_core::Status::Done)
-        .count();
-    assert_eq!(done, 2);
+    feed(&mut f, "V j x"); // select rows 0-1 (c, b)
+    assert_eq!(
+        status_of(&f, &ids[2]),
+        intent_core::Status::Done,
+        "row 0 (c) completed"
+    );
+    assert_eq!(
+        status_of(&f, &ids[1]),
+        intent_core::Status::Done,
+        "row 1 (b) completed"
+    );
+    assert_eq!(
+        status_of(&f, &ids[0]),
+        intent_core::Status::Active,
+        "row 2 (a) untouched"
+    );
     feed(&mut f, "u");
-    let any_done = f
-        .state
-        .store
-        .all_tasks()
-        .unwrap()
-        .iter()
-        .any(|t| t.status == intent_core::Status::Done);
-    assert!(!any_done, "one undo restores both");
+    for id in &ids {
+        assert_eq!(
+            status_of(&f, id),
+            intent_core::Status::Active,
+            "undo restores all"
+        );
+    }
 }
 
-// ---- focus guarantees ---------------------------------------------------------------
+fn status_of(f: &Fixture, id: &str) -> intent_core::Status {
+    f.state.store.get_task(id).unwrap().status
+}
+
+#[test]
+fn visual_complete_upward_selection_exact_rows() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["a", "b", "c"]);
+    feed(&mut f, "j V k x"); // cursor row 1, select up to row 0
+    assert_eq!(
+        status_of(&f, &ids[2]),
+        intent_core::Status::Done,
+        "row 0 completed"
+    );
+    assert_eq!(
+        status_of(&f, &ids[1]),
+        intent_core::Status::Done,
+        "row 1 completed"
+    );
+    assert_eq!(
+        status_of(&f, &ids[0]),
+        intent_core::Status::Active,
+        "row 2 untouched"
+    );
+}
+
+#[test]
+fn visual_archive_exact_rows() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["a", "b", "c"]);
+    feed(&mut f, "j V k d"); // select rows 0-1
+    assert_eq!(status_of(&f, &ids[2]), intent_core::Status::Archived);
+    assert_eq!(status_of(&f, &ids[1]), intent_core::Status::Archived);
+    assert_eq!(
+        status_of(&f, &ids[0]),
+        intent_core::Status::Active,
+        "row 2 untouched"
+    );
+    feed(&mut f, "u");
+    assert_eq!(
+        status_of(&f, &ids[2]),
+        intent_core::Status::Active,
+        "undo restores"
+    );
+}
+
+#[test]
+fn visual_arrow_keys_move_correct_direction() {
+    let mut f = fx();
+    seed(&mut f, &["a", "b", "c"]);
+    feed(&mut f, "V");
+    assert_eq!(f.state.cursor, 0);
+    feed(&mut f, "<down>");
+    assert_eq!(f.state.cursor, 1, "down extends downward");
+    feed(&mut f, "<up>");
+    assert_eq!(f.state.cursor, 0, "up retracts upward");
+}
 
 #[test]
 fn prompt_cancel_restores_focus_and_cursor() {
@@ -681,4 +738,240 @@ fn list_yank_seeds_editor_paste() {
         "yanked titleyanked title"
     );
     feed(&mut f, "<esc><esc>");
+}
+
+// ---- round-2 audit regression tests ----------------------------------------
+
+#[test]
+fn ngg_with_count_lands_and_leaves_no_pending() {
+    let mut f = fx();
+    seed(&mut f, &["a", "b", "c", "d", "e", "f"]);
+    feed(&mut f, "5 g g");
+    assert_eq!(f.state.cursor, 4, "5gg lands on row 5");
+    assert_eq!(f.state.pending_display(), "", "no dangling pending");
+}
+
+#[test]
+fn repeat_preserves_original_count() {
+    let mut f = fx();
+    seed(&mut f, &["a", "b", "c", "d", "e", "f"]);
+    feed(&mut f, "5 x");
+    let done = |st: &GuiState| {
+        st.store
+            .all_tasks()
+            .unwrap()
+            .iter()
+            .filter(|t| t.status == intent_core::Status::Done)
+            .count()
+    };
+    assert_eq!(done(&f.state), 5);
+    feed(&mut f, ".");
+    assert_eq!(done(&f.state), 6, "bare `.` reuses the original count (5x)");
+}
+
+#[test]
+fn repeat_explicit_count_replaces_original() {
+    // Counts 1-4 switch views (SPEC §4.1), so explicit repeat counts use 5+.
+    let mut f = fx();
+    let names: Vec<&str> = (0..20)
+        .map(|i| match i {
+            0 => "t00",
+            1 => "t01",
+            2 => "t02",
+            3 => "t03",
+            4 => "t04",
+            5 => "t05",
+            6 => "t06",
+            7 => "t07",
+            8 => "t08",
+            9 => "t09",
+            10 => "t10",
+            11 => "t11",
+            12 => "t12",
+            13 => "t13",
+            14 => "t14",
+            15 => "t15",
+            16 => "t16",
+            17 => "t17",
+            18 => "t18",
+            _ => "t19",
+        })
+        .collect();
+    seed(&mut f, &names);
+    feed(&mut f, "5 x");
+    let done = |st: &GuiState| {
+        st.store
+            .all_tasks()
+            .unwrap()
+            .iter()
+            .filter(|t| t.status == intent_core::Status::Done)
+            .count()
+    };
+    assert_eq!(done(&f.state), 5);
+    feed(&mut f, "7 .");
+    assert_eq!(
+        done(&f.state),
+        12,
+        "7. replaces the original 5 (bare . would give 10)"
+    );
+}
+
+#[test]
+fn delete_confirmation_y_n_esc_and_stray_keys() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["precious"]);
+    // stray keys are ignored — prompt stays open
+    feed(&mut f, "D");
+    feed(&mut f, "z");
+    assert!(f.state.prompt.is_some(), "stray key ignored");
+    feed(&mut f, "n");
+    assert!(f.state.prompt.is_none());
+    assert!(f.state.store.get_task(&ids[0]).is_ok());
+
+    feed(&mut f, "D");
+    feed(&mut f, "<esc>");
+    assert!(f.state.prompt.is_none());
+    assert!(f.state.store.get_task(&ids[0]).is_ok());
+
+    feed(&mut f, "D");
+    feed(&mut f, "y");
+    assert!(f.state.store.get_task(&ids[0]).is_err(), "y confirms");
+}
+
+#[test]
+fn project_without_argument_is_a_usage_error() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["t"]);
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "project");
+    feed(&mut f, "<cr>");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.project, None, "no argument mutates nothing");
+    assert!(
+        f.state.status.contains("usage"),
+        "status: {:?}",
+        f.state.status
+    );
+}
+
+#[test]
+fn notes_survive_empty_title() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["keep"]);
+    feed(&mut f, "<cr>"); // editor
+    feed(&mut f, "d$"); // empty the title (normal mode, single-line)
+    feed(&mut f, "x");
+    feed(&mut f, "tab"); // to notes
+    feed(&mut f, "i");
+    type_prompt_text(&mut f, "saved notes");
+    feed(&mut f, "<esc>");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.notes, "saved notes", "notes persist despite empty title");
+    assert_eq!(t.title, "keep", "old title kept");
+}
+
+#[test]
+fn search_clear_restores_pre_search_cursor() {
+    let mut f = fx();
+    seed(&mut f, &["alpha thing", "beta thing", "gamma"]);
+    feed(&mut f, "j"); // cursor row 1
+    feed(&mut f, "/");
+    type_prompt_text(&mut f, "thing");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.cursor, 0, "results start at the top");
+    feed(&mut f, "<esc>");
+    assert!(f.state.search_query.is_none());
+    assert_eq!(f.state.cursor, 1, "pre-search cursor restored");
+}
+
+#[test]
+fn external_reload_keeps_cursor_task() {
+    let path = std::env::temp_dir().join(format!(
+        "intent-audit-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let store = Store::open(&path).unwrap();
+    let clip = Rc::new(MemClipboard::new());
+    let mut state = GuiState::new(store, clip);
+    let a = ops::add(
+        &state.store,
+        NewTask {
+            title: "a".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .task
+    .unwrap();
+    let _b = ops::add(
+        &state.store,
+        NewTask {
+            title: "b".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .task
+    .unwrap();
+    state.switch_view(TaskView::Inbox);
+    // Inbox is newest-first: rows [b, a]. Cursor on "a" (row 1).
+    state.handle_key(Key::new("j"));
+    assert_eq!(state.cursor_task().unwrap().id, a.id);
+
+    // External CLI write lands a new task ABOVE the cursor task.
+    let other = Store::open(&path).unwrap();
+    ops::add(
+        &other,
+        NewTask {
+            title: "new".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(state.check_external_changes());
+    assert_eq!(
+        state.cursor_task().unwrap().id,
+        a.id,
+        "cursor follows the task id across the reload"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn empty_date_input_is_an_error_not_a_clear() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["t"]);
+    f.state.switch_view(TaskView::Today);
+    let today = f.state.today;
+    ops::edit(
+        &f.state.store,
+        &ids[0],
+        &intent_core::TaskPatch {
+            due: intent_core::Patch::Set(today),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    f.state.switch_view(TaskView::Today);
+    feed(&mut f, "<space> u");
+    feed(&mut f, "<cr>"); // empty input
+    assert!(f.state.prompt.is_some(), "prompt stays open");
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().due,
+        Some(today),
+        "empty input must not clear the date"
+    );
+    feed(&mut f, "n o n e");
+    feed(&mut f, "<cr>");
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().due,
+        None,
+        "none clears"
+    );
 }

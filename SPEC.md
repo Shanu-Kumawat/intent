@@ -244,8 +244,8 @@ below it; closing the prompt (commit or cancel) returns focus to exactly the
 surface, mode, and cursor it interrupted. There is never more than one prompt.
 
 **Mode/pending display.** The status line always shows: current mode, any
-pending key sequence (e.g. after `d` it shows `d--`, after `2d` it shows
-`2d`), the focused task id, and position. **There are no timeouts**: pending
+pending key sequence (after `d` it shows `d`, after `2d` it shows `2d`),
+the focused task id, and position. **There are no timeouts**: pending
 operators, counts, and leader sequences wait indefinitely; `escape` cancels;
 a key that cannot extend the sequence cancels it with a status message.
 Pending state is always visible, so waiting is safe.
@@ -271,7 +271,7 @@ Pending state is always visible, so waiting is safe.
 | `/`                | search prompt; enter → list shows matches (title/notes/project/tags, all ANDed terms, case-insensitive); `esc` in list clears back to the previous view; `n`/`N` are reserved |
 | `:`                | command prompt (§4.4)                                          |
 | `?`                | help overlay (full keymap; any key closes)                    |
-| `1`–`4`            | switch view inbox/today/upcoming/completed (only with no pending count) |
+| `1`–`4`            | switch view inbox/today/upcoming/completed (only with no pending count). Counts therefore always start with `5`–`9`; `5gg` is the smallest count-gg. |
 | `tab` / `shift-tab`| next / previous view                                           |
 | `u` / `ctrl-r`     | undo / redo task operations (§5)                               |
 | `.`                | repeat last task operation (`x d > < + -` are repeatable), count replaces the original count |
@@ -307,7 +307,8 @@ documented no-op with a status message, not a crash):
   behave like `A`), `esc`/`ctrl-c` exit insert
 - **Insert mode:** printable ASCII, `enter` (split line, NOTES only; in TITLE
   a no-op message), `backspace` (join to previous line in NOTES; start of
-  TITLE no-op), `tab` = 4 spaces, `ctrl-w` delete word back, `ctrl-u` clear line
+  TITLE no-op), `tab` = 4 spaces, `ctrl-w` delete word back, `ctrl-u` delete back to where this insert run
+  started on the line (typed text is cleared; pre-existing text survives)
 - **Paste:** `p P` (§4.5), **Visual:** char-wise `v`, line-wise `V`; motions
   extend; `d x c y ~` operate on selection; `esc` cancels
 - **Undo/redo:** `u`, `ctrl-r` per field buffer (§5)

@@ -34,16 +34,10 @@ pub enum EngineEvent {
 }
 
 impl EngineEvent {
+    /// Navigation events survive merges; TextChanged never overwrites one.
     fn merge(&mut self, other: EngineEvent) {
         if *self == EngineEvent::None {
             *self = other;
-        } else if other == EngineEvent::TextChanged && *self != EngineEvent::TextChanged {
-            // TextChanged wins over nothing-only; navigation events keep it.
-            if *self == EngineEvent::None {
-                *self = other;
-            }
-        } else if *self == EngineEvent::TextChanged {
-            // keep
         }
     }
 }
@@ -128,6 +122,12 @@ enum Cmd {
     DeleteChars {
         count: usize,
         fwd: bool,
+    },
+    /// D / C with Vim semantics: delete the cursor-to-EOL of the cursor line
+    /// plus [count]-1 whole lines below (SPEC §4.2 counts).
+    DeleteToEnd {
+        count: usize,
+        change: bool,
     },
     ReplaceChar {
         count: usize,
@@ -525,6 +525,46 @@ impl Engine {
             Cmd::Op { count, op, target } => {
                 changed = self.do_op(count, op, target, keys);
             }
+            Cmd::DeleteToEnd { count, change } => {
+                let (l, c) = self.cursor;
+                let last = (l + count.max(1) - 1).min(self.buf.line_count() - 1);
+                self.begin_change();
+                // Removed text: cursor-to-EOL of line l, then whole lines
+                // l+1..=last. What remains on line l is its prefix.
+                let mut removed = String::new();
+                removed.extend(&self.buf.lines[l][c..]);
+                for line in &self.buf.lines[l + 1..=last] {
+                    removed.push('\n');
+                    removed.extend(line);
+                }
+                let merged: Vec<char> = self.buf.lines[l][..c].to_vec();
+                if merged.is_empty() && !change {
+                    // Vim: D that covers whole lines removes them entirely —
+                    // no empty line is left behind (2D on "aa\nbb\ncc" → "cc").
+                    self.buf.lines.drain(l..=last);
+                    if self.buf.lines.is_empty() {
+                        self.buf.lines = vec![Vec::new()];
+                    }
+                } else {
+                    self.buf.lines.splice(l..=last, std::iter::once(merged));
+                }
+                self.edit_buffer = Register::charwise(removed);
+                if change {
+                    self.cursor = (l, c);
+                    self.mode = Mode::Insert;
+                    self.insert_origin = Some(self.cursor);
+                    self.insert_keys.clear();
+                    if self.replaying == 0 {
+                        self.last_trigger = keys.to_vec();
+                    }
+                    self.group_open = true;
+                } else {
+                    self.cursor = self.buf.clamp_normal((l, c));
+                    self.end_change();
+                    self.record_change(keys);
+                }
+                changed = true;
+            }
             Cmd::DeleteChars { count, fwd } => {
                 let (l, c) = self.cursor;
                 if fwd {
@@ -588,7 +628,9 @@ impl Engine {
                 }
             }
             Cmd::Join { count } => {
-                for _ in 0..count.max(1) {
+                // [count]J joins [count] LINES, i.e. count-1 join operations
+                // (plain J joins 2 lines).
+                for _ in 0..count.max(2) - 1 {
                     let l = self.cursor.0;
                     if l + 1 >= self.buf.line_count() {
                         break;
@@ -612,10 +654,19 @@ impl Engine {
                 self.clamp_cursor();
             }
             Cmd::Paste { count, after } => {
-                let reg = self.edit_buffer.clone();
+                let mut reg = self.edit_buffer.clone();
                 if reg.text.is_empty() {
                     self.status = "edit buffer is empty".into();
                     return;
+                }
+                // A single-line buffer (task TITLE) can never hold newlines:
+                // pastes are flattened to spaces (SPEC §1 title invariant).
+                if self.single_line {
+                    reg.text = reg.text.replace(['\n', '\r'], " ");
+                    reg.linewise = false;
+                    if reg.text.trim().is_empty() {
+                        return;
+                    }
                 }
                 self.begin_change();
                 let text = reg.text.repeat(count.max(1));
@@ -861,7 +912,6 @@ impl Engine {
 
     fn clamp_cursor(&mut self) {
         self.cursor = self.buf.clamp_normal(self.cursor);
-        self.desired_col = self.desired_col.min(self.cursor.1.max(self.desired_col));
     }
 
     // ---- operators ---------------------------------------------------------------------
@@ -920,11 +970,18 @@ impl Engine {
             if linewise {
                 self.cursor.1 = self.buf.first_non_blank(self.cursor.0);
             }
-            self.record_change(keys);
+            // Yank is not a change (SPEC §4.2): `.` keeps repeating the last
+            // real edit instead of re-yanking.
             return false;
         }
 
         self.begin_change();
+        // The removal start line, for linewise change's replacement insert —
+        // must be captured before `remove_lines` shifts the buffer.
+        let from_line = match region.kind {
+            RegionKind::Line { from, .. } => Some(from),
+            RegionKind::Char { .. } => None,
+        };
         let (text, linewise) = match region.kind {
             RegionKind::Char { start, end } => {
                 let text = self.buf.remove_charwise(start, end);
@@ -952,9 +1009,17 @@ impl Engine {
             }
             OpKind::Change => {
                 if linewise {
-                    let line = self.cursor.0.min(self.buf.line_count());
-                    self.buf.lines.insert(line, Vec::new());
-                    self.cursor = (line, 0);
+                    // Replace the removed lines with ONE blank line at the
+                    // removal position. A buffer that is now a single empty
+                    // line (cc on the only line) needs no replacement.
+                    let already_blank = self.buf.line_count() == 1 && self.buf.lines[0].is_empty();
+                    if !already_blank {
+                        let line = from_line
+                            .unwrap_or(self.cursor.0)
+                            .min(self.buf.line_count());
+                        self.buf.lines.insert(line, Vec::new());
+                        self.cursor = (line, 0);
+                    }
                 }
                 if self.replaying == 0 {
                     self.last_trigger = keys.to_vec();
@@ -1016,10 +1081,10 @@ impl Engine {
                 let mut a = self.cursor;
                 let mut b = self.cursor;
                 if class == CharClass::Whitespace {
-                    while let Some(p) = step_while(&self.buf, a, class, false) {
+                    while let Some(p) = step_while(&self.buf, a, class, big, false) {
                         a = p;
                     }
-                    while let Some(p) = step_while(&self.buf, b, class, true) {
+                    while let Some(p) = step_while(&self.buf, b, class, big, true) {
                         b = p;
                     }
                     if inner {
@@ -1034,10 +1099,10 @@ impl Engine {
                         Some(Region::char(a, e))
                     }
                 } else {
-                    while let Some(p) = step_while(&self.buf, a, class, false) {
+                    while let Some(p) = step_while(&self.buf, a, class, big, false) {
                         a = p;
                     }
-                    while let Some(p) = step_while(&self.buf, b, class, true) {
+                    while let Some(p) = step_while(&self.buf, b, class, big, true) {
                         b = p;
                     }
                     let end = self.buf.pos_after(b);
@@ -1052,7 +1117,7 @@ impl Engine {
                         if e == end {
                             // no trailing whitespace: take leading instead
                             while let Some(p) =
-                                step_while(&self.buf, a, CharClass::Whitespace, false)
+                                step_while(&self.buf, a, CharClass::Whitespace, big, false)
                             {
                                 a = p;
                             }
@@ -1133,6 +1198,11 @@ impl Engine {
     pub fn paste_from_clipboard(&mut self) -> bool {
         match self.clipboard.read() {
             Some(text) if !text.is_empty() => {
+                let text = if self.single_line {
+                    text.replace(['\n', '\r'], " ")
+                } else {
+                    text
+                };
                 self.begin_change();
                 self.cursor = self.buf.insert_text(self.cursor, &text);
                 self.clamp_cursor();
@@ -1369,7 +1439,6 @@ impl Engine {
             self.edit_buffer = reg;
             self.cursor = self.buf.clamp_normal(start);
             self.mode = Mode::Normal;
-            self.record_change(keys);
             return false;
         }
 
@@ -1392,6 +1461,20 @@ impl Engine {
                 true
             }
             OpKind::Change => {
+                // Line-wise change replaces the removed lines with one blank
+                // line at the removal position (Vim `V j c` types onto a new
+                // empty line, never onto the following line's text).
+                if linewise {
+                    let already_blank = self.buf.line_count() == 1 && self.buf.lines[0].is_empty();
+                    if !already_blank {
+                        let line = match region.kind {
+                            RegionKind::Line { from, .. } => from.min(self.buf.line_count()),
+                            _ => self.cursor.0,
+                        };
+                        self.buf.lines.insert(line, Vec::new());
+                        self.cursor = (line, 0);
+                    }
+                }
                 self.mode = Mode::Insert;
                 self.insert_origin = Some(self.cursor);
                 self.insert_keys.clear();
@@ -1703,7 +1786,7 @@ fn find_in_line(
     }
 }
 
-fn step_while(buf: &Buffer, p: Pos, class: CharClass, fwd: bool) -> Option<Pos> {
+fn step_while(buf: &Buffer, p: Pos, class: CharClass, big: bool, fwd: bool) -> Option<Pos> {
     let q = if fwd {
         buf.pos_after(p)
     } else {
@@ -1712,7 +1795,7 @@ fn step_while(buf: &Buffer, p: Pos, class: CharClass, fwd: bool) -> Option<Pos> 
     if q == p {
         return None;
     }
-    match buf.char_at(q).map(|c| char_class(c, false)) {
+    match buf.char_at(q).map(|c| char_class(c, big)) {
         Some(k) if k == class => Some(q),
         _ => None,
     }
@@ -1971,15 +2054,13 @@ fn simple_command(c: char, count: usize) -> Option<Cmd> {
             op: OpKind::Change,
             target: Target::Lines,
         },
-        'D' => Cmd::Op {
-            count: 1,
-            op: OpKind::Delete,
-            target: Target::Motion(Motion::LineEnd),
+        'D' => Cmd::DeleteToEnd {
+            count,
+            change: false,
         },
-        'C' => Cmd::Op {
-            count: 1,
-            op: OpKind::Change,
-            target: Target::Motion(Motion::LineEnd),
+        'C' => Cmd::DeleteToEnd {
+            count,
+            change: true,
         },
         'Y' => Cmd::Op {
             count,

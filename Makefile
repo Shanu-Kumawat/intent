@@ -36,10 +36,12 @@ build:
 test:
 	$(CARGO) test --workspace --locked
 
-# Alias that reads like CI language; runs the suite plus fmt/clippy gates.
+# CI-shaped gate: suite, fmt, clippy over every target, conformance suite
+# against the freshly built debug binary.
 check: test
 	$(CARGO) fmt --all -- --check
-	$(CARGO) clippy --workspace --locked -- -D warnings
+	$(CARGO) clippy --workspace --all-targets --locked -- -D warnings
+	INTENT_BIN=$(TARGET_DIR)/debug/intent python3 scripts/spec_verify.py
 
 # Install requires prebuilt release binaries — never compile here, so a
 # sudo'd install can never leave root-owned build artifacts behind.

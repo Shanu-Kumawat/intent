@@ -76,7 +76,7 @@ pub fn search(tasks: &[Task], query: &str, include_archived: bool) -> Vec<Task> 
     if terms.is_empty() {
         return Vec::new();
     }
-    tasks
+    let mut hits: Vec<Task> = tasks
         .iter()
         .filter(|t| include_archived || t.status != Status::Archived)
         .filter(|t| {
@@ -91,7 +91,15 @@ pub fn search(tasks: &[Task], query: &str, include_archived: bool) -> Vec<Task> 
             terms.iter().all(|term| hay.contains(term))
         })
         .cloned()
-        .collect()
+        .collect();
+    // Deterministic order — same as the `all` view (newest activity first);
+    // searching must not inherit all_tasks' insertion order.
+    hits.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    hits
 }
 
 /// Filters available on `list` beyond the view itself.
@@ -209,14 +217,15 @@ mod tests {
         });
         let _ = ops::archive(&s, &archived_task.id);
 
-        let mut high = seed(NewTask {
+        let high = seed(NewTask {
             title: "high undated".into(),
             no_inbox: true,
             ..Default::default()
         });
-        high.priority = Priority::High;
-        let mut p = crate::model::TaskPatch::default();
-        p.priority = crate::model::Patch::Set(Priority::High);
+        let p = crate::model::TaskPatch {
+            priority: crate::model::Patch::Set(Priority::High),
+            ..Default::default()
+        };
         let _ = ops::edit(&s, &high.id, &p);
 
         s.all_tasks().unwrap()

@@ -348,7 +348,7 @@ impl NewTask {
         if self.title.trim().is_empty() {
             return Err(bad_value("title must not be empty"));
         }
-        if self.title.contains('\n') {
+        if self.title.contains(['\n', '\r']) {
             return Err(bad_value("title must be a single line"));
         }
         Ok(())
@@ -398,19 +398,25 @@ mod tests {
             completed_at: None,
         };
 
-        let mut p = TaskPatch::default();
-        p.priority = Patch::Set(Priority::High);
+        let p = TaskPatch {
+            priority: Patch::Set(Priority::High),
+            ..Default::default()
+        };
         p.apply(&mut t);
         assert!(t.inbox, "priority alone must not clear inbox");
 
-        let mut p = TaskPatch::default();
-        p.due = Patch::Set(crate::dates::Date(jiff::civil::date(2026, 11, 2)));
+        let p = TaskPatch {
+            due: Patch::Set(crate::dates::Date(jiff::civil::date(2026, 11, 2))),
+            ..Default::default()
+        };
         p.apply(&mut t);
         assert!(!t.inbox, "setting due clears inbox");
         assert_eq!(t.due.map(|d| d.to_string()), Some("2026-11-02".into()));
 
-        let mut p = TaskPatch::default();
-        p.project = Patch::Set(String::new());
+        let p = TaskPatch {
+            project: Patch::Set(String::new()),
+            ..Default::default()
+        };
         p.apply(&mut t);
         assert_eq!(t.project, None, "empty project sets None");
     }

@@ -2936,9 +2936,6 @@ dependencies = [
 [[package]]
 name = "intent-vim"
 version = "0.1.0"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "interpolate_name"

@@ -177,10 +177,10 @@ pub fn parse_date(input: &str, today: Date) -> Result<Date> {
 
 /// True when `input` unambiguously means "clear this date" where allowed.
 pub fn is_clear_marker(input: &str) -> bool {
-    matches!(
-        input.trim().to_ascii_lowercase().as_str(),
-        "none" | "-" | ""
-    )
+    // SPEC §1.4: only `none` or `-` clear a date. An empty string is an
+    // error, never a silent clear (a mistyped empty flag must not destroy
+    // a date).
+    matches!(input.trim().to_ascii_lowercase().as_str(), "none" | "-")
 }
 
 pub fn parse_priority(input: &str) -> Result<crate::model::Priority> {

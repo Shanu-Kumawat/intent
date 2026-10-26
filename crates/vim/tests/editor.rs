@@ -574,8 +574,66 @@ fn join_lines() {
     let (mut e, _) = engine("one\ntwo\nthree");
     feed(&mut e, "J");
     assert_eq!(e.text(), "one two\nthree");
+    // [count]J joins [count] lines: 2J equals plain J here (Vim semantics).
+    feed(&mut e, "u");
     feed(&mut e, "2 J");
+    assert_eq!(e.text(), "one two\nthree");
+    feed(&mut e, "u");
+    feed(&mut e, "3 J");
     assert_eq!(e.text(), "one two three");
+}
+
+// ---- round-2 audit regression tests -------------------------------------------
+
+#[test]
+fn visual_linewise_change_types_onto_blank_line() {
+    let (mut e, _) = engine("a\nb\nc");
+    feed(&mut e, "V j c X <esc>");
+    assert_eq!(
+        e.text(),
+        "X\nc",
+        "following line must survive linewise change"
+    );
+}
+
+#[test]
+fn cc_single_line_needs_no_extra_blank() {
+    let (mut e, _) = engine("abc");
+    feed(&mut e, "c c Q <esc>");
+    assert_eq!(e.text(), "Q", "cc on the only line leaves exactly one line");
+}
+
+#[test]
+fn cc_last_line_replaces_last_line() {
+    let (mut e, _) = engine("a\nb\nc");
+    feed(&mut e, "j j c c Q <esc>");
+    assert_eq!(e.text(), "a\nb\nQ", "blank replacement goes at the end");
+}
+
+#[test]
+fn d_capital_honors_count() {
+    let (mut e, _) = engine("aa\nbb\ncc");
+    feed(&mut e, "2 D");
+    assert_eq!(e.text(), "cc", "2D deletes through the second line's end");
+}
+
+#[test]
+fn yank_does_not_replace_last_change() {
+    let (mut e, _) = engine("abcdef");
+    feed(&mut e, "x"); // delete 'a'
+    feed(&mut e, "y l"); // yank 'b' — must NOT become the repeat target
+    feed(&mut e, ".");
+    assert_eq!(e.text(), "cdef", "`.` repeats the deletion, not the yank");
+}
+
+#[test]
+fn paste_into_title_flattens_newlines() {
+    let clip = std::rc::Rc::new(MemClipboard::new());
+    clip.write("a\nb");
+    let mut e = Engine::new("t", true, Box::new(ClipAdapter(clip)));
+    assert!(e.paste_from_clipboard());
+    assert_eq!(e.text(), "a bt", "title paste flattens to one line");
+    assert!(!e.text().contains('\n'));
 }
 
 #[test]

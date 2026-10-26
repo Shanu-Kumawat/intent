@@ -303,10 +303,15 @@ fn status_bar(state: &GuiState) -> impl IntoElement {
         format!("{}/{}", state.cursor + 1, state.rows.len())
     };
     let id = state
-        .cursor_task()
-        .map(|t| t.id.clone())
-        .or_else(|| state.editor.as_ref().map(|e| e.task_id.clone()))
+        .editor_task_id()
+        .map(str::to_string)
+        .or_else(|| state.cursor_task().map(|t| t.id.clone()))
         .unwrap_or_default();
+    // In the editor the position is the buffer line/column, not the list row.
+    let pos = state
+        .editor_position()
+        .map(|(l, c)| format!("{l}:{c}"))
+        .unwrap_or(pos);
     div()
         .flex()
         .items_center()
@@ -518,6 +523,7 @@ fn help_overlay() -> gpui::AnyElement {
         "x                complete    d    archive",
         "SPC d/u/r        defer/due/remind prompt",
         "SPC o            organize    > <  shift due ±1",
+        "SPC D            unarchive   SPC p  paste system clipboard",
         "+ -              priority    .    repeat",
         "y Y              yank        V    visual mode",
         "D                delete      u ctrl-r undo/redo",
@@ -552,7 +558,12 @@ fn help_overlay() -> gpui::AnyElement {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Self-heal focus loss (e.g. after window activation): Intent routes
+        // every surface's keys through this one root handle.
+        if !self.focus.is_focused(window) {
+            self.focus.focus(window);
+        }
         let state = &self.state;
         let rows_len = state.rows.len();
         let list_scroll = self.list_scroll.clone();
@@ -591,9 +602,9 @@ impl Render for Shell {
             .on_key_down(cx.listener(Self::dispatch_key))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _e: &MouseDownEvent, _window, cx| {
+                cx.listener(|this, _e: &MouseDownEvent, window, cx| {
                     // Clicking anywhere returns key focus to the app surface.
-                    let _ = this;
+                    window.focus(&this.focus);
                     cx.notify();
                 }),
             )
@@ -649,6 +660,11 @@ fn main() {
                     clip,
                     focus: cx.focus_handle(),
                     list_scroll: UniformListScrollHandle::new(),
+                });
+                // Key dispatch requires a focused handle; without this the
+                // window is keyboard-dead until clicked.
+                entity.update(cx, |shell, _| {
+                    shell.focus.focus(window);
                 });
 
                 // Poll for external (CLI/agent) database changes every 2s.

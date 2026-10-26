@@ -28,22 +28,33 @@ impl Store {
     /// Default database path: `$INTENT_DB`, else `$XDG_DATA_HOME/intent/tasks.db`,
     /// else `~/.local/share/intent/tasks.db` (SPEC §2). An empty `INTENT_DB`
     /// is treated as unset — SQLite would otherwise open a throwaway temp
-    /// database and the user's writes would silently vanish.
-    pub fn default_path() -> PathBuf {
+    /// database and the user's writes would silently vanish. `INTENT_DB` must
+    /// be absolute (SPEC §2).
+    pub fn default_path() -> Result<PathBuf> {
         if let Some(p) = std::env::var("INTENT_DB").ok().filter(|s| !s.is_empty()) {
-            return PathBuf::from(p);
+            let path = PathBuf::from(&p);
+            if !path.is_absolute() {
+                return Err(crate::error::bad_value(format!(
+                    "INTENT_DB must be an absolute path, got {p:?}"
+                )));
+            }
+            return Ok(path);
         }
         let base = std::env::var("XDG_DATA_HOME")
             .ok()
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
             .or_else(|| home_dir().map(|h| h.join(".local/share")))
-            .expect("no home directory available for database path");
-        base.join("intent").join("tasks.db")
+            .ok_or_else(|| {
+                crate::error::bad_value(
+                    "cannot determine a database location: set INTENT_DB, XDG_DATA_HOME, or HOME",
+                )
+            })?;
+        Ok(base.join("intent").join("tasks.db"))
     }
 
     pub fn open_default() -> Result<Store> {
-        Store::open(&Store::default_path())
+        Store::open(&Store::default_path()?)
     }
 
     /// In-memory store for tests.
@@ -61,6 +72,21 @@ impl Store {
     }
 
     fn migrate(&self) -> Result<()> {
+        // BEGIN IMMEDIATE serializes first-open races between processes: two
+        // fresh openers can't both observe "no schema_version".
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let migrate_result = self.migrate_inner();
+        match migrate_result {
+            Ok(()) => self.conn.execute_batch("COMMIT")?,
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    fn migrate_inner(&self) -> Result<()> {
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS meta(
                  key TEXT PRIMARY KEY,
@@ -93,7 +119,7 @@ impl Store {
         match version {
             None => {
                 self.conn.execute(
-                    "INSERT INTO meta(key, value) VALUES('schema_version', ?1)",
+                    "INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', ?1)",
                     params![SCHEMA_VERSION.to_string()],
                 )?;
             }
@@ -114,6 +140,18 @@ impl Store {
         Ok(())
     }
 
+    /// Begin a transaction. Every multi-row mutation must run inside one so
+    /// a failure mid-batch leaves the database untouched (SPEC §2).
+    pub fn transaction(&self) -> Result<rusqlite::Transaction<'_>> {
+        self.conn.unchecked_transaction().map_err(Into::into)
+    }
+
+    /// Escape hatch for ops that must compose inside a transaction
+    /// (`Transaction` derefs to `Connection`). Prefer the ops-layer helpers.
+    pub fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     /// Monotonic counter that changes when another connection commits.
     /// Used by the GUI to detect external writes (SPEC §2).
     pub fn data_version(&self) -> Result<u64> {
@@ -124,7 +162,39 @@ impl Store {
     }
 
     pub fn insert_task(&self, task: &Task) -> Result<()> {
-        self.conn.execute(
+        insert_task_conn(&self.conn, task)
+    }
+
+    pub fn update_task(&self, task: &Task) -> Result<()> {
+        update_task_conn(&self.conn, task)
+    }
+
+    pub fn get_task(&self, id: &str) -> Result<Task> {
+        get_task_conn(&self.conn, id)
+    }
+
+    pub fn delete_task(&self, id: &str) -> Result<bool> {
+        delete_task_conn(&self.conn, id)
+    }
+
+    pub fn all_tasks(&self) -> Result<Vec<Task>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM tasks ORDER BY created_at, id")?;
+        let rows = stmt.query_map([], row_to_task)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+}
+
+/// Connection-level primitives so ops can compose inside a transaction
+/// (`Transaction` derefs to `Connection`).
+pub fn insert_task_conn(conn: &Connection, task: &Task) -> Result<()> {
+    {
+        conn.execute(
             "INSERT INTO tasks(id, title, notes, status, inbox, priority, project, tags,
                                due, remind, defer_until, created_at, updated_at, completed_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
@@ -147,93 +217,103 @@ impl Store {
         )?;
         Ok(())
     }
-
-    pub fn update_task(&self, task: &Task) -> Result<()> {
-        let n = self.conn.execute(
-            "UPDATE tasks SET title=?2, notes=?3, status=?4, inbox=?5, priority=?6, project=?7,
-                              tags=?8, due=?9, remind=?10, defer_until=?11, updated_at=?12,
-                              completed_at=?13
-             WHERE id=?1",
-            params![
-                task.id,
-                task.title,
-                task.notes,
-                task.status.as_str(),
-                task.inbox as i64,
-                task.priority.as_str(),
-                task.project,
-                serde_json::to_string(&task.tags).expect("tags serialize"),
-                task.due.map(|d| d.to_string()),
-                task.remind.map(|d| d.to_string()),
-                task.defer_until.map(|d| d.to_string()),
-                task.updated_at.to_string(),
-                task.completed_at.map(|t| t.to_string()),
-            ],
-        )?;
-        if n == 0 {
-            return Err(CoreError::NotFound(task.id.clone()));
-        }
-        Ok(())
-    }
-
-    pub fn get_task(&self, id: &str) -> Result<Task> {
-        self.conn
-            .query_row("SELECT * FROM tasks WHERE id=?1", params![id], row_to_task)
-            .optional()?
-            .ok_or_else(|| CoreError::NotFound(id.to_string()))
-    }
-
-    pub fn delete_task(&self, id: &str) -> Result<bool> {
-        let n = self
-            .conn
-            .execute("DELETE FROM tasks WHERE id=?1", params![id])?;
-        Ok(n > 0)
-    }
-
-    /// All tasks, any status. Views/search filter on top of this (SPEC §1.3).
-    pub fn all_tasks(&self) -> Result<Vec<Task>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT * FROM tasks ORDER BY created_at, id")?;
-        let rows = stmt.query_map([], row_to_task)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
-    }
 }
 
+pub fn update_task_conn(conn: &Connection, task: &Task) -> Result<()> {
+    let n = conn.execute(
+        "UPDATE tasks SET title=?2, notes=?3, status=?4, inbox=?5, priority=?6, project=?7,
+                          tags=?8, due=?9, remind=?10, defer_until=?11, updated_at=?12,
+                          completed_at=?13
+         WHERE id=?1",
+        params![
+            task.id,
+            task.title,
+            task.notes,
+            task.status.as_str(),
+            task.inbox as i64,
+            task.priority.as_str(),
+            task.project,
+            serde_json::to_string(&task.tags).expect("tags serialize"),
+            task.due.map(|d| d.to_string()),
+            task.remind.map(|d| d.to_string()),
+            task.defer_until.map(|d| d.to_string()),
+            task.updated_at.to_string(),
+            task.completed_at.map(|t| t.to_string()),
+        ],
+    )?;
+    if n == 0 {
+        return Err(CoreError::NotFound(task.id.clone()));
+    }
+    Ok(())
+}
+
+pub fn get_task_conn(conn: &Connection, id: &str) -> Result<Task> {
+    conn.query_row("SELECT * FROM tasks WHERE id=?1", params![id], row_to_task)
+        .optional()?
+        .ok_or_else(|| CoreError::NotFound(id.to_string()))
+}
+
+pub fn delete_task_conn(conn: &Connection, id: &str) -> Result<bool> {
+    let n = conn.execute("DELETE FROM tasks WHERE id=?1", params![id])?;
+    Ok(n > 0)
+}
+
+/// Strict row decoding (SPEC §2): a stored value that cannot be decoded is a
+/// database error, never silently replaced with a default — a corrupt
+/// done/archived task must not resurface as a fresh active one.
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+    let bad = |col: &str, value: &str| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            format!("column {col}: cannot decode {value:?}").into(),
+        )
+    };
     let status: String = row.get("status")?;
+    let status = Status::parse(&status).ok_or_else(|| bad("status", &status))?;
     let priority: String = row.get("priority")?;
+    let priority = Priority::parse(&priority).ok_or_else(|| bad("priority", &priority))?;
     let tags_json: String = row.get("tags")?;
-    let due: Option<String> = row.get("due")?;
-    let remind: Option<String> = row.get("remind")?;
-    let defer_until: Option<String> = row.get("defer_until")?;
+    let tags: Vec<String> =
+        serde_json::from_str(&tags_json).map_err(|_| bad("tags", &tags_json))?;
+    let parse_date_col = |col: &str, v: &Option<String>| -> rusqlite::Result<Option<Date>> {
+        match v {
+            None => Ok(None),
+            Some(s) => s
+                .parse::<jiff::civil::Date>()
+                .map(|d| Some(Date(d)))
+                .map_err(|_| bad(col, s)),
+        }
+    };
+    let parse_ts_col =
+        |col: &str, s: &str| -> rusqlite::Result<Timestamp> { s.parse().map_err(|_| bad(col, s)) };
+    let due = parse_date_col("due", &row.get::<_, Option<String>>("due")?)?;
+    let remind = parse_date_col("remind", &row.get::<_, Option<String>>("remind")?)?;
+    let defer_until = parse_date_col("defer_until", &row.get::<_, Option<String>>("defer_until")?)?;
     let created_at: String = row.get("created_at")?;
+    let created_at = parse_ts_col("created_at", &created_at)?;
     let updated_at: String = row.get("updated_at")?;
-    let completed_at: Option<String> = row.get("completed_at")?;
+    let updated_at = parse_ts_col("updated_at", &updated_at)?;
+    let completed_at = match row.get::<_, Option<String>>("completed_at")? {
+        None => None,
+        Some(s) => Some(parse_ts_col("completed_at", &s)?),
+    };
     Ok(Task {
         id: row.get("id")?,
         title: row.get("title")?,
         notes: row.get("notes")?,
-        status: Status::parse(&status).unwrap_or(Status::Active),
+        status,
         inbox: row.get::<_, i64>("inbox")? != 0,
-        priority: Priority::parse(&priority).unwrap_or(Priority::None),
+        priority,
         project: row.get("project")?,
-        tags: serde_json::from_str(&tags_json).unwrap_or_default(),
-        due: due.and_then(|s| s.parse().ok()).map(Date),
-        remind: remind.and_then(|s| s.parse().ok()).map(Date),
-        defer_until: defer_until.and_then(|s| s.parse().ok()).map(Date),
-        created_at: parse_ts(&created_at),
-        updated_at: parse_ts(&updated_at),
-        completed_at: completed_at.and_then(|s| s.parse::<Timestamp>().ok()),
+        tags,
+        due,
+        remind,
+        defer_until,
+        created_at,
+        updated_at,
+        completed_at,
     })
-}
-
-fn parse_ts(s: &str) -> Timestamp {
-    s.parse().unwrap_or_else(|_| Timestamp::now())
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -316,13 +396,16 @@ mod tests {
         let saved = std::env::var("INTENT_DB").ok();
         std::env::set_var("INTENT_DB", "/tmp/intent-test-override.db");
         assert_eq!(
-            Store::default_path(),
+            Store::default_path().unwrap(),
             PathBuf::from("/tmp/intent-test-override.db")
         );
         // Empty INTENT_DB is treated as unset (SQLite temp-db hazard, SPEC §2).
         std::env::set_var("INTENT_DB", "");
-        let p = Store::default_path();
+        let p = Store::default_path().unwrap();
         assert!(p.file_name().map(|f| f == "tasks.db").unwrap_or(false));
+        // Relative INTENT_DB is rejected (SPEC §2: absolute path required).
+        std::env::set_var("INTENT_DB", "relative.db");
+        assert_eq!(Store::default_path().unwrap_err().code(), "bad_value");
         match saved {
             Some(v) => std::env::set_var("INTENT_DB", v),
             None => std::env::remove_var("INTENT_DB"),

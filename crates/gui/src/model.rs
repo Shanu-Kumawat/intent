@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use intent_core::dates::{is_clear_marker, parse_date};
-use intent_core::model::{Patch, Priority, Status, Task, TaskPatch, TaskView};
+use intent_core::model::{Patch, Priority, Task, TaskPatch, TaskView};
 use intent_core::ops::{self, RowChange};
 use intent_core::views::{counts, for_view, search};
 use intent_core::{NewTask, Store};
@@ -107,10 +107,10 @@ impl Clipboard for SharedClipboard {
 
 #[derive(Debug, Clone, Copy)]
 enum Repeatable {
-    Complete,
-    Archive,
-    ShiftDue { delta: i64 },
-    Priority { delta: i8 },
+    Complete { n: usize },
+    Archive { n: usize },
+    ShiftDue { delta: i64, n: usize },
+    Priority { delta: i8, n: usize },
 }
 
 pub struct GuiState {
@@ -126,6 +126,8 @@ pub struct GuiState {
     pub view_counts: BTreeMap<TaskView, usize>,
     cursors: BTreeMap<TaskView, usize>,
     follow_id: Option<String>,
+    /// Task id under the cursor when a search opened; restored on esc.
+    pre_search_task: Option<String>,
     pending: Vec<Key>,
 
     pub editor: Option<EditorState>,
@@ -157,6 +159,7 @@ impl GuiState {
             view_counts: BTreeMap::new(),
             cursors: BTreeMap::new(),
             follow_id: None,
+            pre_search_task: None,
             pending: Vec::new(),
             editor: None,
             prompt: None,
@@ -210,6 +213,9 @@ impl GuiState {
         match self.store.data_version() {
             Ok(v) if v != self.data_version => {
                 self.data_version = v;
+                // Cursor follows the task id across the reload (SPEC §2),
+                // not the row index.
+                self.follow_id = self.cursor_task().map(|t| t.id.clone());
                 self.refresh();
                 self.status = "database changed externally — reloaded".into();
                 true
@@ -246,24 +252,36 @@ impl GuiState {
     // ---- prompts -----------------------------------------------------------------
 
     fn open_prompt(&mut self, kind: PromptKind, target_id: Option<String>) {
+        self.open_prompt_with_input(kind, target_id, String::new());
+    }
+
+    /// Reopening a prompt after an error preserves what was typed (SPEC §4.3:
+    /// the prompt stays open; focus never bounces on bad input).
+    fn open_prompt_with_input(
+        &mut self,
+        kind: PromptKind,
+        target_id: Option<String>,
+        input: String,
+    ) {
         self.prompt = Some(Prompt {
             kind,
-            input: String::new(),
+            input,
             error: None,
             target_id,
         });
     }
 
     fn handle_prompt_key(&mut self, key: Key) {
-        // Deletion confirmation decides on a single keypress: y confirms,
-        // anything else cancels (SPEC §4.3 "deliberate but fast").
+        // Deletion confirmation: y/Y confirms, n/N/esc cancels, every other
+        // key is ignored so a stray press cannot confirm or dismiss (SPEC §4.1).
         if self.prompt.as_ref().map(|p| p.kind) == Some(PromptKind::ConfirmDelete) {
-            let prompt = self.prompt.take().expect("prompt");
             if matches!(key.chr(), Some('y' | 'Y')) {
+                let prompt = self.prompt.take().expect("prompt");
                 if let Some(id) = prompt.target_id {
                     self.delete_task(&id);
                 }
-            } else {
+            } else if key.is_esc() || key.is_enter() || matches!(key.chr(), Some('n' | 'N')) {
+                self.prompt = None;
                 self.set_status("delete cancelled");
             }
             return;
@@ -312,8 +330,9 @@ impl GuiState {
         match prompt.kind {
             PromptKind::Capture => {
                 let title = prompt.input.trim();
+                let typed = prompt.input.clone();
                 if title.is_empty() {
-                    self.open_prompt(PromptKind::Capture, None);
+                    self.open_prompt_with_input(PromptKind::Capture, None, typed);
                     self.prompt_error("a title is required");
                     return;
                 }
@@ -334,7 +353,7 @@ impl GuiState {
                         self.set_status(format!("captured {}", task.id));
                     }
                     Err(e) => {
-                        self.open_prompt(PromptKind::Capture, None);
+                        self.open_prompt_with_input(PromptKind::Capture, None, typed);
                         self.prompt_error(&e.to_string());
                         return;
                     }
@@ -350,13 +369,19 @@ impl GuiState {
                     }
                 };
                 let input = prompt.input.trim();
+                let typed = prompt.input.clone();
+                if input.is_empty() {
+                    self.open_prompt_with_input(prompt.kind, Some(id), typed);
+                    self.prompt_error("a date is required (none/- clears)");
+                    return;
+                }
                 let value = if is_clear_marker(input) {
                     None
                 } else {
                     match parse_date(input, self.today) {
                         Ok(d) => Some(d),
                         Err(e) => {
-                            self.reopen_date_prompt(prompt.kind, Some(id));
+                            self.open_prompt_with_input(prompt.kind, Some(id), typed);
                             self.prompt_error(&e.to_string());
                             return;
                         }
@@ -417,20 +442,15 @@ impl GuiState {
                     self.run_command(line);
                 } else {
                     let err = format!("unknown command :{cmd}");
-                    self.open_prompt(PromptKind::Command, prompt.target_id.clone());
+                    self.open_prompt_with_input(
+                        PromptKind::Command,
+                        prompt.target_id.clone(),
+                        prompt.input.clone(),
+                    );
                     self.prompt_error(&err);
                 }
             }
-            PromptKind::ConfirmDelete => {
-                let ans = prompt.input.trim().to_ascii_lowercase();
-                if ans == "y" || ans == "yes" {
-                    if let Some(id) = prompt.target_id {
-                        self.delete_task(&id);
-                    }
-                } else {
-                    self.set_status("delete cancelled");
-                }
-            }
+            PromptKind::ConfirmDelete => unreachable!("handled in handle_prompt_key"),
         }
     }
 
@@ -438,10 +458,6 @@ impl GuiState {
         if let Some(p) = self.prompt.as_mut() {
             p.error = Some(msg.to_string());
         }
-    }
-
-    fn reopen_date_prompt(&mut self, kind: PromptKind, id: Option<String>) {
-        self.open_prompt(kind, id);
     }
 
     // ---- commands (:) ----------------------------------------------------------
@@ -522,7 +538,9 @@ impl GuiState {
                 }
             }
             "project" => {
-                if let Some(id) = target_id {
+                if rest.is_empty() {
+                    self.set_status("usage: :project <name|none>");
+                } else if let Some(id) = target_id {
                     let patch = TaskPatch {
                         project: if is_clear_marker(rest) {
                             Patch::Clear
@@ -783,16 +801,21 @@ impl GuiState {
             Some(ed) => (ed.title.text(), ed.notes.text()),
             None => return,
         };
-        // Titles are never empty (SPEC §1); keep the old one otherwise.
-        if title.trim().is_empty() {
-            self.set_status("title must not be empty");
-            return;
-        }
         let Ok(mut task) = self.store.get_task(task_id) else {
             return;
         };
-        task.title = title;
+        // Notes persist independently of the title (SPEC §4.2: fields are
+        // independent buffers). A title is only ever empty mid-edit; the old
+        // one stays until it is valid again.
         task.notes = notes;
+        if title.trim().is_empty() {
+            self.set_status("title must not be empty — notes saved");
+        } else if title.contains('\n') || title.contains('\r') {
+            self.set_status("titles are single-line — notes saved");
+        } else {
+            task.title = title;
+            self.status.clear();
+        }
         task.updated_at = intent_core::Timestamp::now();
         if let Err(e) = self.store.update_task(&task) {
             self.set_status(e.to_string());
@@ -855,6 +878,9 @@ impl GuiState {
                 self.set_status("");
             } else if self.search_query.is_some() {
                 self.search_query = None;
+                // Back to the task that was under the cursor before the
+                // search (SPEC §2: by id, not by row index).
+                self.follow_id = self.pre_search_task.take();
                 self.refresh();
                 self.set_status("search cleared");
             } else {
@@ -936,11 +962,17 @@ impl GuiState {
             return;
         };
 
-        // Pending `g`: only `g` completes it (gg).
-        if self.pending.len() == 1 && self.pending[0].chr() == Some('g') {
+        // Pending `g` (gg): a leading count may precede the first g (5gg).
+        if self.pending.last().map(|k| k.chr()) == Some(Some('g')) {
             if c == 'g' {
-                let (count, had_count) = self.take_count();
-                self.move_cursor_to(if had_count { count - 1 } else { 0 });
+                let count = self
+                    .pending
+                    .iter()
+                    .take_while(|k| k.chr().map(|c| c.is_ascii_digit()).unwrap_or(false))
+                    .fold(0usize, |n, k| {
+                        n * 10 + (k.chr().unwrap().to_digit(10).unwrap() as usize)
+                    });
+                self.move_cursor_to(if count > 0 { count - 1 } else { 0 });
             } else {
                 self.set_status("sequence cancelled");
             }
@@ -974,8 +1006,13 @@ impl GuiState {
             'j' => self.move_cursor(1, count),
             'k' => self.move_cursor(-1, count),
             'g' => {
+                // gg always waits for the second g — with or without a count
+                // (5gg lands on row 5). Re-enter pending with the count.
                 if had_count {
-                    self.move_cursor_to(count - 1);
+                    self.pending = format!("{count}g")
+                        .chars()
+                        .map(|ch| Key::new(&ch.to_string()))
+                        .collect();
                 } else {
                     self.pending.push(Key::new("g"));
                 }
@@ -1007,14 +1044,17 @@ impl GuiState {
             }
             'o' => self.open_prompt(PromptKind::Capture, None),
             'i' | 'a' => self.open_cursor_editor(true),
-            '/' => self.open_prompt(PromptKind::Search, None),
+            '/' => {
+                self.pre_search_task = self.cursor_task().map(|t| t.id.clone());
+                self.open_prompt(PromptKind::Search, None);
+            }
             ':' => {
                 let target = self.cursor_task().map(|t| t.id.clone());
                 self.open_prompt(PromptKind::Command, target);
             }
             '?' => self.help_open = true,
             'u' => self.undo(),
-            '.' => self.repeat_last(count),
+            '.' => self.repeat_last(count, had_count),
             _ => self.set_status(format!("unbound key: {}", key.display())),
         }
     }
@@ -1100,11 +1140,11 @@ impl GuiState {
 
     fn handle_visual_key(&mut self, key: Key) {
         match (key.ctrl, key.key.as_str()) {
-            (false, "up") | (false, "j") => {
+            (false, "down") | (false, "j") => {
                 self.move_cursor(1, 1);
                 return;
             }
-            (false, "down") | (false, "k") => {
+            (false, "up") | (false, "k") => {
                 self.move_cursor(-1, 1);
                 return;
             }
@@ -1169,81 +1209,58 @@ impl GuiState {
     fn complete_range(&mut self, count: usize) {
         let ids = self.row_ids(self.cursor, count);
         self.complete_ids(ids);
-        self.last_op = Some(Repeatable::Complete);
+        self.last_op = Some(Repeatable::Complete { n: count });
     }
 
     fn complete_rows(&mut self, a: usize, b: usize) {
         let n = self.row_ids(a, b - a + 1).len();
-        self.complete_range(n);
-        self.last_op = Some(Repeatable::Complete);
+        let ids = self.row_ids(a, n);
+        self.complete_ids(ids);
+        self.last_op = Some(Repeatable::Complete { n });
     }
 
     fn complete_ids(&mut self, ids: Vec<String>) {
-        let mut changes = Vec::new();
-        for id in &ids {
-            match self.toggle_complete_one(id) {
-                Ok(Some(change)) => changes.push(change),
-                Ok(None) => {}
-                Err(e) => {
-                    self.set_status(e.to_string());
-                    break;
-                }
+        // One transaction for the whole batch (SPEC §2): partial results are
+        // impossible, and the undo entry only exists after a successful
+        // commit.
+        match ops::complete_many(&self.store, &ids) {
+            Ok(changes) if !changes.is_empty() => {
+                self.follow_id = Some(changes[0].id.clone());
+                self.push_undo_from(changes);
+                self.set_status(if ids.len() == 1 {
+                    "completion toggled"
+                } else {
+                    "completions toggled"
+                });
             }
-        }
-        if !changes.is_empty() {
-            self.follow_id = Some(changes[0].id.clone());
-            self.push_undo_from(changes);
-            self.set_status(if ids.len() == 1 {
-                "completion toggled"
-            } else {
-                "completions toggled"
-            });
+            Ok(_) => {}
+            Err(e) => self.set_status(e.to_string()),
         }
         self.refresh();
-    }
-
-    /// x semantics (SPEC §4.1): active→done, done→active, archived→active.
-    fn toggle_complete_one(&mut self, id: &str) -> intent_core::Result<Option<RowChange>> {
-        let task = self.store.get_task(id)?;
-        let out = match task.status {
-            Status::Active => ops::done(&self.store, id)?,
-            Status::Done => ops::reopen(&self.store, id)?,
-            _ => ops::unarchive(&self.store, id)?,
-        };
-        Ok(out.change)
     }
 
     fn archive_range(&mut self, count: usize) {
         let ids = self.row_ids(self.cursor, count);
         self.archive_ids(ids);
-        self.last_op = Some(Repeatable::Archive);
+        self.last_op = Some(Repeatable::Archive { n: count });
     }
 
     fn archive_rows(&mut self, a: usize, b: usize) {
         let n = self.row_ids(a, b - a + 1).len();
-        self.archive_range(n);
-        self.last_op = Some(Repeatable::Archive);
+        let ids = self.row_ids(a, n);
+        self.archive_ids(ids);
+        self.last_op = Some(Repeatable::Archive { n });
     }
 
     fn archive_ids(&mut self, ids: Vec<String>) {
-        let mut changes = Vec::new();
-        for id in &ids {
-            match ops::archive(&self.store, id) {
-                Ok(out) => {
-                    if let Some(c) = out.change {
-                        changes.push(c);
-                    }
-                }
-                Err(e) => {
-                    self.set_status(e.to_string());
-                    break;
-                }
+        match ops::archive_many(&self.store, &ids) {
+            Ok(changes) if !changes.is_empty() => {
+                self.follow_id = Some(changes[0].id.clone());
+                self.push_undo_from(changes);
+                self.set_status("archived");
             }
-        }
-        if !changes.is_empty() {
-            self.follow_id = Some(changes[0].id.clone());
-            self.push_undo_from(changes);
-            self.set_status("archived");
+            Ok(_) => {}
+            Err(e) => self.set_status(e.to_string()),
         }
         self.refresh();
     }
@@ -1270,7 +1287,7 @@ impl GuiState {
             return;
         }
         self.apply_patch(&task.id, patch, "due shifted");
-        self.last_op = Some(Repeatable::ShiftDue { delta });
+        self.last_op = Some(Repeatable::ShiftDue { delta, n: count });
     }
 
     fn bump_priority(&mut self, delta: i8, count: usize) {
@@ -1287,7 +1304,7 @@ impl GuiState {
             ..Default::default()
         };
         self.apply_patch(&task.id, patch, "priority changed");
-        self.last_op = Some(Repeatable::Priority { delta });
+        self.last_op = Some(Repeatable::Priority { delta, n: count });
     }
 
     /// y = title; Y = title + notes (SPEC §4.1).
@@ -1348,12 +1365,22 @@ impl GuiState {
         self.refresh();
     }
 
-    fn repeat_last(&mut self, count: usize) {
+    fn repeat_last(&mut self, count: usize, had_count: bool) {
+        // SPEC §4.1: an explicit count replaces the original count; a bare
+        // `.` repeats with the original.
         match self.last_op {
-            Some(Repeatable::Complete) => self.complete_range(count),
-            Some(Repeatable::Archive) => self.archive_range(count),
-            Some(Repeatable::ShiftDue { delta }) => self.shift_due(delta, count),
-            Some(Repeatable::Priority { delta }) => self.bump_priority(delta, count),
+            Some(Repeatable::Complete { n }) => {
+                self.complete_range(if had_count { count } else { n })
+            }
+            Some(Repeatable::Archive { n }) => {
+                self.archive_range(if had_count { count } else { n })
+            }
+            Some(Repeatable::ShiftDue { delta, n }) => {
+                self.shift_due(delta, if had_count { count } else { n })
+            }
+            Some(Repeatable::Priority { delta, n }) => {
+                self.bump_priority(delta, if had_count { count } else { n })
+            }
             None => self.set_status("nothing to repeat"),
         }
     }
@@ -1379,19 +1406,19 @@ impl GuiState {
             self.set_status("undo inside the editor edits text (u passes through)");
             return;
         }
-        match self.undo.pop() {
+        match self.undo.last() {
             Some(entry) => {
-                let mut first_id = None;
-                for change in &entry {
-                    if first_id.is_none() {
-                        first_id = Some(change.id.clone());
+                // Atomic: on failure nothing is applied and the stack stays.
+                match ops::apply_changes(&self.store, entry, false) {
+                    Ok(()) => {
+                        let entry = self.undo.pop().expect("checked above");
+                        self.follow_id = entry.first().map(|c| c.id.clone());
+                        self.redo.push(entry);
+                        self.set_status("undo");
+                        self.refresh();
                     }
-                    let _ = ops::apply_change(&self.store, change, false);
+                    Err(e) => self.set_status(format!("undo failed: {e}")),
                 }
-                self.follow_id = first_id;
-                self.redo.push(entry);
-                self.set_status("undo");
-                self.refresh();
             }
             None => self.set_status("nothing to undo"),
         }
@@ -1402,25 +1429,43 @@ impl GuiState {
             self.set_status("redo inside the editor edits text (ctrl-r passes through)");
             return;
         }
-        match self.redo.pop() {
-            Some(entry) => {
-                let mut first_id = None;
-                for change in &entry {
-                    if first_id.is_none() {
-                        first_id = Some(change.id.clone());
-                    }
-                    let _ = ops::apply_change(&self.store, change, true);
+        match self.redo.last() {
+            Some(entry) => match ops::apply_changes(&self.store, entry, true) {
+                Ok(()) => {
+                    let entry = self.redo.pop().expect("checked above");
+                    self.follow_id = entry.first().map(|c| c.id.clone());
+                    self.undo.push(entry);
+                    self.set_status("redo");
+                    self.refresh();
                 }
-                self.follow_id = first_id;
-                self.undo.push(entry);
-                self.set_status("redo");
-                self.refresh();
-            }
+                Err(e) => self.set_status(format!("redo failed: {e}")),
+            },
             None => self.set_status("nothing to redo"),
         }
     }
 
+    /// Cursor line/column within the focused editor field (1-based for
+    /// display), or None when no editor is open.
+    pub fn editor_position(&self) -> Option<(usize, usize)> {
+        let ed = self.editor.as_ref()?;
+        let (l, c) = ed.focused().cursor();
+        Some((l + 1, c + 1))
+    }
+
+    /// The task the editor has open, if any.
+    pub fn editor_task_id(&self) -> Option<&str> {
+        self.editor.as_ref().map(|e| e.task_id.as_str())
+    }
+
     pub fn pending_display(&self) -> String {
+        // The focused surface wins (SPEC §4: pending state is always
+        // visible — editor sequences like `d` included).
+        if let Some(ed) = &self.editor {
+            let engine_pending = ed.focused().pending_display();
+            if !engine_pending.is_empty() {
+                return engine_pending;
+            }
+        }
         self.pending
             .iter()
             .map(|k| {
@@ -1458,5 +1503,3 @@ pub fn priority_mark(p: Priority) -> &'static str {
         _ => "",
     }
 }
-
-pub use keys::plain_char;

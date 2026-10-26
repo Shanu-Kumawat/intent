@@ -3,7 +3,8 @@
 Every check cites the SPEC.md section it verifies."""
 import json, os, shutil, subprocess, sys, tempfile, concurrent.futures
 
-BIN = "./target/debug/intent"
+import os as _os
+BIN = _os.environ.get("INTENT_BIN", "./target/debug/intent")
 DB_DIR = tempfile.mkdtemp(prefix="intent-spec-")
 DB = os.path.join(DB_DIR, "tasks.db")
 

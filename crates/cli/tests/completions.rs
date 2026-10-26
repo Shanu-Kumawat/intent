@@ -48,3 +48,16 @@ fn completions_compose_with_global_flags() {
         assert!(!out.stdout.is_empty());
     }
 }
+
+#[test]
+fn completions_usage_error_is_json_with_json_flag() {
+    // SPEC §3: --json present → even usage errors are the JSON envelope.
+    let out = Command::new(env!("CARGO_BIN_EXE_intent"))
+        .args(["--json", "completions", "notashell"])
+        .env("INTENT_DB", "/dev/null")
+        .output()
+        .expect("run intent");
+    assert_eq!(out.status.code(), Some(2));
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).expect("JSON error");
+    assert_eq!(v["error"]["code"], "usage");
+}

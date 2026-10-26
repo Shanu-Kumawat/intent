@@ -5,3 +5,7 @@ Cargo.lock.bak
 *.db-shm
 .idea/
 .vscode/
+
+# editor/agent state
+.zcode/
+vendor/xattr/.cargo-ok

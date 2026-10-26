@@ -66,7 +66,7 @@ intent --help
 export PATH="$PWD/target/release:$PATH"
 
 intent add "Renew passport"           # lands in the inbox, 6-char id printed
-intent                                # = intent list all --help for everything
+intent --help                         # full command surface
 intent list inbox
 intent edit <id> --due friday --project admin
 intent list today
@@ -182,10 +182,10 @@ crates/gui    intent-gui    pure interaction-model layer (tested headless)
 ```
 
 `core`, `vim`, and the GUI's model layer import no windowing code, so the
-entire interaction spec is covered by headless unit tests (105 at the
-moment): view classification, date parsing, undo snapshots, the complete Vim
-grammar, prompt/focus guarantees, and the CLI contract end-to-end via the
-real binary.
+entire interaction spec is covered by headless unit tests: view
+classification, date parsing, undo snapshots, the complete Vim grammar,
+prompt/focus guarantees, and the CLI contract end-to-end via the real
+binary. Run `make test` for the current count.
 
 ## Repository layout
 
@@ -204,8 +204,8 @@ real binary.
 ## Testing
 
 ```sh
-make test             # full suite (124 tests across all crates)
-make check            # tests + cargo fmt --check + clippy -D warnings
+make test             # full workspace test suite
+make check            # tests + fmt --check + clippy -D warnings + conformance
 ```
 
 ## Non-goals

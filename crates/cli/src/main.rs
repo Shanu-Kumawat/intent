@@ -170,6 +170,13 @@ fn main() {
                 return;
             }
             Err(err) => {
+                // SPEC §3: with --json present, usage errors are JSON too.
+                if std::env::args().any(|a| a == "--json") {
+                    let payload =
+                        serde_json::json!({"error": {"code": "usage", "message": err.to_string()}});
+                    eprintln!("{payload}");
+                    std::process::exit(2);
+                }
                 let _ = err.print();
                 std::process::exit(err.exit_code());
             }
