@@ -627,3 +627,41 @@ fn internal_register_struct_shape() {
     let r = Register::charwise("x");
     assert!(!r.linewise && r.text == "x");
 }
+
+// ---- spec-verification additions (SPEC §4.2, §4.5) -------------------------------
+
+#[test]
+fn single_quote_text_objects() {
+    // i' a' are in the §4.2 text-object set.
+    let (mut e, _) = engine("it's fine' end");
+    feed(&mut e, "f ' d a '");
+    assert_eq!(e.text(), "it end");
+
+    let (mut e, _) = engine("it's fine' end");
+    feed(&mut e, "f ' d i '");
+    assert_eq!(e.text(), "it'' end", "both quotes survive an inner delete");
+}
+
+#[test]
+fn backtick_text_objects() {
+    let (mut e, _) = engine("cmd `ls -la` done");
+    feed(&mut e, "f ` d i `");
+    assert_eq!(e.text(), "cmd `` done");
+}
+
+#[test]
+fn undo_does_not_restore_registers() {
+    // SPEC §4.5 rule 6: the clipboard is never restored by undo.
+    let (mut e, _) = engine("abc def");
+    feed(&mut e, "d w u P");
+    assert_eq!(e.text(), "abc abc def", "undo restored text; edit buffer kept the deletion");
+}
+
+#[test]
+fn yank_then_paste_survives_intervening_undo() {
+    // x populates the edit buffer, yy overwrites it with the yank, and the
+    // undo of x must not touch the register (SPEC §4.5 rule 6).
+    let (mut e, _) = engine("abc\ndef");
+    feed(&mut e, "x y y u p");
+    assert_eq!(e.text(), "abc\nbc\ndef", "yanked register survived the undo");
+}

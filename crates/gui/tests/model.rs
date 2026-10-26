@@ -515,3 +515,40 @@ fn yank_writes_clipboard() {
     feed(&mut f, "Y");
     assert_eq!(f.clip.read().as_deref(), Some("hello task"));
 }
+
+// ---- spec-verification additions (SPEC §4.1) --------------------------------------
+
+#[test]
+fn ctrl_d_and_ctrl_u_jump_ten_rows() {
+    let mut f = fx();
+    seed(&mut f, &["a","b","c","d","e","f","g","h","i","j","k","l"]);
+    feed(&mut f, "<c-d>");
+    assert_eq!(f.state.cursor, 10, "ctrl-d jumps 10 rows");
+    feed(&mut f, "<c-d>");
+    assert_eq!(f.state.cursor, 11, "clamped at the last row");
+    feed(&mut f, "<c-u>");
+    assert_eq!(f.state.cursor, 1, "ctrl-u jumps 10 rows back");
+}
+
+#[test]
+fn x_on_archived_revives_to_active() {
+    // SPEC §4.1: x semantics — archived → active.
+    let mut f = fx();
+    let ids = seed(&mut f, &["old"]);
+    feed(&mut f, "d"); // archive
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "archived");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.rows.len(), 1);
+    feed(&mut f, "x");
+    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Active);
+}
+
+#[test]
+fn visual_y_writes_titles_to_clipboard() {
+    let mut f = fx();
+    seed(&mut f, &["first", "second"]);
+    feed(&mut f, "V j y");
+    let text = f.clip.read().unwrap_or_default();
+    assert_eq!(text, "second\nfirst", "visual y yanks newline-joined titles (inbox is newest-first)");
+}
