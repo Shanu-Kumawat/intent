@@ -12,6 +12,7 @@ pub mod views;
 
 pub use dates::{parse_date, today, Date};
 pub use error::{CoreError, Result};
+pub use jiff::Timestamp;
 pub use model::{NewTask, Patch, Priority, Status, Task, TaskPatch, TaskView, ALL_VIEWS};
 pub use ops::{apply_change, RowChange};
 pub use store::Store;

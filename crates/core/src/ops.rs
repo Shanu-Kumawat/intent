@@ -2,7 +2,7 @@ use jiff::Timestamp;
 
 use crate::error::Result;
 use crate::id;
-use crate::model::{NewTask, Priority, Status, Task, TaskPatch};
+use crate::model::{NewTask, Patch, Priority, Status, Task, TaskPatch};
 use crate::store::Store;
 
 /// One task's before/after snapshots for a mutation. The GUI builds undo
@@ -64,6 +64,18 @@ pub fn add(store: &Store, spec: NewTask) -> Result<OpOutcome> {
 
 /// Apply an arbitrary patch to a task.
 pub fn edit(store: &Store, task_id: &str, patch: &TaskPatch) -> Result<OpOutcome> {
+    // Title constraints match creation (SPEC §1): single line, non-empty.
+    let mut patch = patch.clone();
+    if let Patch::Set(t) = &patch.title {
+        let trimmed = t.trim().to_string();
+        if trimmed.is_empty() {
+            return Err(crate::error::bad_value("title must not be empty"));
+        }
+        if trimmed.contains('\n') {
+            return Err(crate::error::bad_value("title must be a single line"));
+        }
+        patch.title = Patch::Set(trimmed);
+    }
     let before = store.get_task(task_id)?;
     let mut after = before.clone();
     if !patch.apply(&mut after) {

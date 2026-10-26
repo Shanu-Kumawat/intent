@@ -1673,7 +1673,14 @@ fn parse_count(keys: &[Key], i: &mut usize) -> Option<usize> {
                 *i += 1;
             }
             Some(d @ '0'..='9') if n.is_some() => {
-                n = Some(n.unwrap() * 10 + (d as usize - '0' as usize));
+                // Saturate instead of overflowing (debug builds panic); cap
+                // at a sane maximum — larger counts are meaningless here.
+                n = Some(
+                    n.unwrap()
+                        .saturating_mul(10)
+                        .saturating_add(d as usize - '0' as usize)
+                        .min(100_000),
+                );
                 *i += 1;
             }
             _ => break,
@@ -1758,6 +1765,18 @@ fn parse(keys: &[Key]) -> Parse {
                 if end != keys.len() {
                     Parse::Invalid
                 } else {
+                    // gg/G in operator position need the count folded into
+                    // the motion itself (d3G → through line 3, d2gg → lines
+                    // 1–2), mirroring the plain-Move remap below.
+                    let motion = match motion {
+                        Motion::GotoLine { .. } if keys[j].chr() == Some('g') => {
+                            Motion::GotoLine { line: count2.or(count1).or(Some(1)) }
+                        }
+                        Motion::GotoLine { line: None } if keys[j].chr() == Some('G') => {
+                            Motion::GotoLine { line: count1.or(count2) }
+                        }
+                        m => m,
+                    };
                     Parse::Ready(Cmd::Op { count: total, op: op_kind(c), target: Target::Motion(motion) })
                 }
             }

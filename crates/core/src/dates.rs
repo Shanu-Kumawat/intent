@@ -15,16 +15,20 @@ impl Date {
         self.0.to_string()
     }
 
+    /// Arithmetic saturates at the calendar bounds (year 1 .. 9999) instead
+    /// of panicking — user-supplied offsets like `+999999y` are clamped.
+    /// Inputs are also clamped inside jiff's Span parameter ranges (which
+    /// themselves panic when exceeded), well beyond any reachable date.
     pub fn add_days(self, days: i64) -> Date {
-        Date(self.0.checked_add(days.days()).expect("date arithmetic overflow"))
+        Date(self.0.saturating_add(days.clamp(-4_000_000, 4_000_000).days()))
     }
 
     pub fn add_months(self, months: i64) -> Date {
-        Date(self.0.checked_add(months.months()).expect("date arithmetic overflow"))
+        Date(self.0.saturating_add(months.clamp(-239_976, 239_976).months()))
     }
 
     pub fn add_years(self, years: i64) -> Date {
-        Date(self.0.checked_add(years.years()).expect("date arithmetic overflow"))
+        Date(self.0.saturating_add(years.clamp(-19_998, 19_998).years()))
     }
 
     pub fn days_until(self, other: Date) -> i64 {
@@ -148,7 +152,7 @@ pub fn parse_date(input: &str, today: Date) -> Result<Date> {
         let n = if negative { -n } else { n };
         return Ok(match unit {
             'd' => today.add_days(n),
-            'w' => today.add_days(n * 7),
+            'w' => today.add_days(n.saturating_mul(7)),
             'm' => today.add_months(n),
             'y' => today.add_years(n),
             _ => unreachable!(),

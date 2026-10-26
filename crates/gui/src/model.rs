@@ -708,8 +708,9 @@ impl GuiState {
             }
             return;
         }
-        // Esc with nothing pending in normal mode closes the editor.
-        if key.is_esc() && !in_text_insert {
+        // Esc with nothing pending in NORMAL mode closes the editor; in
+        // visual mode it must fall through to the engine (exits visual).
+        if key.is_esc() && !in_text_insert && engine_mode == intent_vim::Mode::Normal {
             let pending_empty = self
                 .editor
                 .as_ref()
@@ -738,10 +739,19 @@ impl GuiState {
     }
 
     fn write_editor_through(&mut self, task_id: &str) {
-        let Some(ed) = self.editor.as_ref() else { return };
+        let (title, notes) = match self.editor.as_ref() {
+            Some(ed) => (ed.title.text(), ed.notes.text()),
+            None => return,
+        };
+        // Titles are never empty (SPEC §1); keep the old one otherwise.
+        if title.trim().is_empty() {
+            self.set_status("title must not be empty");
+            return;
+        }
         let Ok(mut task) = self.store.get_task(task_id) else { return };
-        task.title = ed.title.text();
-        task.notes = ed.notes.text();
+        task.title = title;
+        task.notes = notes;
+        task.updated_at = intent_core::Timestamp::now();
         if let Err(e) = self.store.update_task(&task) {
             self.set_status(e.to_string());
         }
@@ -971,9 +981,14 @@ impl GuiState {
         let mut consumed = 0;
         for k in &self.pending {
             if let Some(d) = k.chr().and_then(|c| c.to_digit(10)) {
+                // Saturate + cap, mirroring the vim engine's parse_count.
                 n = Some(match n {
                     None => d as usize,
-                    Some(prev) => prev * 10 + d as usize,
+                    Some(prev) => {
+                        prev.saturating_mul(10)
+                            .saturating_add(d as usize)
+                            .min(100_000)
+                    }
                 });
                 consumed += 1;
             } else {
