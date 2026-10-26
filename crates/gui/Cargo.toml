@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "intent_gui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "intent-gui"
 path = "src/main.rs"

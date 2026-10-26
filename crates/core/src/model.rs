@@ -117,7 +117,7 @@ impl<'de> serde::Deserialize<'de> for Priority {
 }
 
 /// Task views (SPEC §1.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum TaskView {
     Inbox,
