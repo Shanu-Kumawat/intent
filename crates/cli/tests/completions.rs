@@ -33,3 +33,18 @@ fn completions_reject_unknown_shell() {
     let out = gen("notashell");
     assert_eq!(out.status.code(), Some(2), "usage error");
 }
+
+#[test]
+fn completions_compose_with_global_flags() {
+    // Regression: `intent --json completions bash` used to panic.
+    let cases: [&[&str]; 2] = [&["--json", "completions", "bash"], &["completions", "zsh"]];
+    for args in cases {
+        let out = Command::new(env!("CARGO_BIN_EXE_intent"))
+            .args(args)
+            .env("INTENT_DB", "/dev/null")
+            .output()
+            .expect("run intent");
+        assert!(out.status.success(), "completions with {args:?} failed");
+        assert!(!out.stdout.is_empty());
+    }
+}

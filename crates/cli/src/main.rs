@@ -152,8 +152,10 @@ enum Cmd {
 }
 
 fn main() {
-    // Completions bypass the database entirely and never touch --json.
-    if std::env::args().nth(1).as_deref() == Some("completions") {
+    // Completions bypass the database entirely. Detect the subcommand as the
+    // first non-flag argument so global flags (--json etc.) still compose.
+    let first_positional = std::env::args().skip(1).find(|a| !a.starts_with('-'));
+    if first_positional.as_deref() == Some("completions") {
         match Cli::try_parse() {
             Ok(Cli {
                 command: Cmd::Completions { shell },

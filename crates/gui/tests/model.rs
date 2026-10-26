@@ -237,7 +237,7 @@ fn x_toggles_completion_and_undo_restores() {
 }
 
 #[test]
-fn d_archives_and_space_D_unarchives() {
+fn d_archives_and_space_d_unarchives() {
     let mut f = fx();
     let ids = seed(&mut f, &["one"]);
     feed(&mut f, "d");
@@ -258,7 +258,7 @@ fn d_archives_and_space_D_unarchives() {
 }
 
 #[test]
-fn capital_D_delete_requires_confirmation_and_is_undoable() {
+fn capital_d_delete_requires_confirmation_and_is_undoable() {
     let mut f = fx();
     let ids = seed(&mut f, &["precious"]);
     feed(&mut f, "D");

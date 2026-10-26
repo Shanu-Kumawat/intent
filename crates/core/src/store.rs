@@ -246,7 +246,6 @@ fn home_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::NewTask;
 
     fn task(id: &str, title: &str) -> Task {
         Task {
