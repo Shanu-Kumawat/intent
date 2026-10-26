@@ -6,8 +6,8 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{
     div, px, uniform_list, App, Application, ClipboardItem, Context, FocusHandle, KeyDownEvent,
-    MouseButton, MouseDownEvent, Render, ScrollStrategy, SharedString, Timer, UniformListScrollHandle,
-    Window, WindowBounds, WindowOptions,
+    MouseButton, MouseDownEvent, Render, ScrollStrategy, SharedString, Timer,
+    UniformListScrollHandle, Window, WindowBounds, WindowOptions,
 };
 
 use intent_core::{Store, TaskView};
@@ -102,7 +102,6 @@ impl Shell {
         }
         cx.notify();
     }
-
 }
 
 fn header(state: &GuiState) -> impl IntoElement {
@@ -128,10 +127,20 @@ fn header(state: &GuiState) -> impl IntoElement {
                 .gap_2()
                 .child(div().font_weight(gpui::FontWeight::BOLD).child("INTENT"))
                 .child(div().text_color(gpui::rgba(0x888888ff)).child("///"))
-                .child(div().font_weight(gpui::FontWeight::BOLD).child(SharedString::from(
-                    state.search_query.is_some().then(|| "SEARCH".to_string()).unwrap_or_else(|| state.view.to_string().to_uppercase()),
-                )))
-                .child(div().text_color(gpui::rgba(0x888888ff)).child(SharedString::from(search))),
+                .child(
+                    div()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .child(SharedString::from(if state.search_query.is_some() {
+                            "SEARCH".to_string()
+                        } else {
+                            state.view.to_string().to_uppercase()
+                        })),
+                )
+                .child(
+                    div()
+                        .text_color(gpui::rgba(0x888888ff))
+                        .child(SharedString::from(search)),
+                ),
         )
         .child(div().child(SharedString::from(state.today.to_string())))
 }
@@ -143,14 +152,27 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
         (3, TaskView::Upcoming),
         (4, TaskView::Completed),
     ];
-    let mut col = div().flex().flex_col().w(px(196.0)).border_r_2().border_color(BLACK);
+    let mut col = div()
+        .flex()
+        .flex_col()
+        .w(px(196.0))
+        .border_r_2()
+        .border_color(BLACK);
     for (n, view) in items {
         let active = state.view == view;
         let count = state.view_counts.get(&view).copied().unwrap_or(0);
         let label = format!("{n} {}", view.to_string().to_uppercase());
-        let mut row = div().id(SharedString::from(format!("sb-{n}"))).flex().justify_between().px_4().py_2();
+        let mut row = div()
+            .id(SharedString::from(format!("sb-{n}")))
+            .flex()
+            .justify_between()
+            .px_4()
+            .py_2();
         if active {
-            row = row.bg(BLACK).text_color(WHITE).font_weight(gpui::FontWeight::BOLD);
+            row = row
+                .bg(BLACK)
+                .text_color(WHITE)
+                .font_weight(gpui::FontWeight::BOLD);
         }
         col = col.child(row.child(label).child(format!("{count}")));
     }
@@ -175,7 +197,11 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     let in_visual = state
         .visual_anchor
         .map(|a| {
-            let (lo, hi) = if a <= state.cursor { (a, state.cursor) } else { (state.cursor, a) };
+            let (lo, hi) = if a <= state.cursor {
+                (a, state.cursor)
+            } else {
+                (state.cursor, a)
+            };
             ix >= lo && ix <= hi
         })
         .unwrap_or(false);
@@ -242,14 +268,29 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
             } else {
                 gpui::FontWeight::NORMAL
             })
-            .when(task.status == intent_core::Status::Done, |d| d.line_through())
+            .when(task.status == intent_core::Status::Done, |d| {
+                d.line_through()
+            })
             .child(title),
     )
-    .child(div().text_size(px(12.0)).text_color(if inverse { gpui::rgba(0xbbbbbbff) } else { GREY }).child(meta))
     .child(
         div()
             .text_size(px(12.0))
-            .text_color(if inverse { gpui::rgba(0xbbbbbbff) } else { GREY })
+            .text_color(if inverse {
+                gpui::rgba(0xbbbbbbff)
+            } else {
+                GREY
+            })
+            .child(meta),
+    )
+    .child(
+        div()
+            .text_size(px(12.0))
+            .text_color(if inverse {
+                gpui::rgba(0xbbbbbbff)
+            } else {
+                GREY
+            })
             .child(task.id.clone()),
     )
     .into_any_element()
@@ -284,7 +325,11 @@ fn status_bar(state: &GuiState) -> impl IntoElement {
                 .font_weight(gpui::FontWeight::BOLD)
                 .child(SharedString::from(state.mode_label())),
         )
-        .child(div().min_w(px(60.0)).child(SharedString::from(state.pending_display())))
+        .child(
+            div()
+                .min_w(px(60.0))
+                .child(SharedString::from(state.pending_display())),
+        )
         .child(div().text_color(GREY).child(id))
         .child(div().text_color(GREY).child(pos))
         .child(div().flex_1())
@@ -304,7 +349,11 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
     if p.kind != PromptKind::Command && !p.input.is_empty() {
         input = p.input.clone();
     }
-    let caret = if p.kind == PromptKind::ConfirmDelete { "" } else { "▮" };
+    let caret = if p.kind == PromptKind::ConfirmDelete {
+        ""
+    } else {
+        "▮"
+    };
     let err = p.error.clone().unwrap_or_default();
     div()
         .flex()
@@ -319,7 +368,11 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(div().font_weight(gpui::FontWeight::BOLD).child(p.kind.label()))
+                .child(
+                    div()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .child(p.kind.label()),
+                )
                 .child(div().child(format!("{input}{caret}"))),
         )
         .when(!err.is_empty(), |d| {
@@ -338,7 +391,13 @@ fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoEleme
     // Character ranges [start,end) of inverse text on this line.
     let (s_start, s_end, linewise) = match sel {
         Some((a, b, lw)) if a.0 <= line_ix && b.0 >= line_ix && (lw || b.0 > line_ix || true) => {
-            let s = if lw { 0 } else if a.0 == line_ix { a.1 } else { 0 };
+            let s = if lw {
+                0
+            } else if a.0 == line_ix {
+                a.1
+            } else {
+                0
+            };
             let e = if lw {
                 chars.len()
             } else if b.0 == line_ix {
@@ -364,7 +423,15 @@ fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoEleme
         let in_sel = s_start <= ix && ix < s_end;
         let is_caret = caret_at == Some(ix);
         let inverse = in_sel || (is_caret && !insert_mode);
-        let len = if inverse { 1 } else { (s_start.max(ix + 1).min(if s_end > ix { s_end } else { chars.len() }) - ix).max(1) };
+        let len = if inverse {
+            1
+        } else {
+            (s_start
+                .max(ix + 1)
+                .min(if s_end > ix { s_end } else { chars.len() })
+                - ix)
+                .max(1)
+        };
         let len = len.min(chars.len() - ix);
         segments.push((chars[ix..ix + len].iter().collect(), inverse));
         ix += len;
@@ -402,7 +469,11 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
             .p_2()
             .m_2()
             .border_2()
-            .border_color(if focused { BLACK } else { gpui::rgba(0x999999ff) });
+            .border_color(if focused {
+                BLACK
+            } else {
+                gpui::rgba(0x999999ff)
+            });
         if focused {
             col = col.bg(WHITE);
         }
@@ -424,7 +495,7 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
         .flex()
         .flex_col()
         .flex_1()
-        .map(|d| scrollable(d))
+        .map(scrollable)
         .bg(PAPER)
         .child(field("TITLE", &ed.title, ed.focus_title))
         .child(field("NOTES", &ed.notes, !ed.focus_title))
@@ -486,13 +557,15 @@ impl Render for Shell {
         let rows_len = state.rows.len();
         let list_scroll = self.list_scroll.clone();
 
-        let list = uniform_list("tasks", rows_len, cx.processor(
-            move |this: &mut Shell, range: Range<usize>, _window, _cx| {
+        let list = uniform_list(
+            "tasks",
+            rows_len,
+            cx.processor(move |this: &mut Shell, range: Range<usize>, _window, _cx| {
                 range
                     .map(|ix| task_row(&this.state, ix))
                     .collect::<Vec<_>>()
-            },
-        ))
+            }),
+        )
         .track_scroll(list_scroll.clone());
 
         let empty = div()
@@ -565,6 +638,9 @@ fn main() {
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                // Matched by the desktop entry's StartupWMClass; also becomes
+                // the X11 WM_CLASS (gpui routes it to both).
+                app_id: Some("intent-gui".into()),
                 ..Default::default()
             },
             |window, cx| {
@@ -578,17 +654,15 @@ fn main() {
                 // Poll for external (CLI/agent) database changes every 2s.
                 let poll = entity.clone();
                 window
-                    .spawn(cx, async move |cx| {
-                        loop {
-                            Timer::after(Duration::from_secs(2)).await;
-                            let _ = cx.update(|_window, cx| {
-                                poll.update(cx, |shell: &mut Shell, cx| {
-                                    if shell.state.check_external_changes() {
-                                        cx.notify();
-                                    }
-                                });
+                    .spawn(cx, async move |cx| loop {
+                        Timer::after(Duration::from_secs(2)).await;
+                        let _ = cx.update(|_window, cx| {
+                            poll.update(cx, |shell: &mut Shell, cx| {
+                                if shell.state.check_external_changes() {
+                                    cx.notify();
+                                }
                             });
-                        }
+                        });
                     })
                     .detach();
                 entity

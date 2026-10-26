@@ -44,5 +44,9 @@ pub fn from_display(key: &str, ctrl: bool, shift: bool) -> Key {
             _ => key.to_string(),
         }
     };
-    Key { key: normalized, ctrl, shift }
+    Key {
+        key: normalized,
+        ctrl,
+        shift,
+    }
 }

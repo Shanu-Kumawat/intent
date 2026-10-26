@@ -21,7 +21,11 @@ pub fn for_view(tasks: &[Task], view: TaskView, today: Date) -> Vec<Task> {
         .cloned()
         .collect();
     match view {
-        TaskView::Inbox => out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.id.cmp(&b.id))),
+        TaskView::Inbox => out.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        }),
         TaskView::Today => out.sort_by(|a, b| {
             due_key(a)
                 .cmp(&due_key(b))
@@ -34,12 +38,16 @@ pub fn for_view(tasks: &[Task], view: TaskView, today: Date) -> Vec<Task> {
                 .then_with(|| b.priority.cmp(&a.priority))
                 .then_with(|| a.created_at.cmp(&b.created_at))
         }),
-        TaskView::Completed => {
-            out.sort_by(|a, b| b.completed_at.cmp(&a.completed_at).then_with(|| a.id.cmp(&b.id)))
-        }
-        TaskView::Archived | TaskView::All => {
-            out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then_with(|| a.id.cmp(&b.id)))
-        }
+        TaskView::Completed => out.sort_by(|a, b| {
+            b.completed_at
+                .cmp(&a.completed_at)
+                .then_with(|| a.id.cmp(&b.id))
+        }),
+        TaskView::Archived | TaskView::All => out.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.id.cmp(&b.id))
+        }),
     }
     out
 }
@@ -54,10 +62,7 @@ fn due_key(t: &Task) -> (u8, Date) {
 
 fn upcoming_key(t: &Task, _today: Date) -> (u8, Date, u8) {
     // Earliest of due/remind/defers ascending; undated ("someday") last.
-    let earliest = [t.due, t.remind, t.defer_until]
-        .into_iter()
-        .flatten()
-        .min();
+    let earliest = [t.due, t.remind, t.defer_until].into_iter().flatten().min();
     match earliest {
         Some(d) => (0, d, 0),
         None => (1, Date(jiff::civil::date(9999, 12, 31)), 0),
@@ -67,10 +72,7 @@ fn upcoming_key(t: &Task, _today: Date) -> (u8, Date, u8) {
 /// Case-insensitive AND-terms search over title, notes, project, and tags
 /// (SPEC §4.1 `/`). Archived excluded unless asked.
 pub fn search(tasks: &[Task], query: &str, include_archived: bool) -> Vec<Task> {
-    let terms: Vec<String> = query
-        .split_whitespace()
-        .map(|t| t.to_lowercase())
-        .collect();
+    let terms: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
     if terms.is_empty() {
         return Vec::new();
     }
@@ -152,7 +154,10 @@ mod tests {
         let s = Store::open_memory().unwrap();
         let seed = |n: NewTask| ops::add(&s, n).unwrap().task.unwrap();
 
-        let inbox_task = seed(NewTask { title: "fresh capture".into(), ..Default::default() });
+        let inbox_task = seed(NewTask {
+            title: "fresh capture".into(),
+            ..Default::default()
+        });
         assert!(inbox_task.inbox);
 
         let overdue = seed(NewTask {
@@ -176,7 +181,11 @@ mod tests {
         });
         let _ = remind_today;
 
-        let someday = seed(NewTask { title: "someday".into(), no_inbox: true, ..Default::default() });
+        let someday = seed(NewTask {
+            title: "someday".into(),
+            no_inbox: true,
+            ..Default::default()
+        });
         let _ = someday;
 
         let mut deferred = seed(NewTask {
@@ -188,13 +197,23 @@ mod tests {
         // write through store to keep single source
         let _ = ops::defer(&s, &deferred.id, Some(Date(date(2026, 11, 1))));
 
-        let done_task = seed(NewTask { title: "finished".into(), ..Default::default() });
+        let done_task = seed(NewTask {
+            title: "finished".into(),
+            ..Default::default()
+        });
         let _ = ops::done(&s, &done_task.id);
 
-        let archived_task = seed(NewTask { title: "gone".into(), ..Default::default() });
+        let archived_task = seed(NewTask {
+            title: "gone".into(),
+            ..Default::default()
+        });
         let _ = ops::archive(&s, &archived_task.id);
 
-        let mut high = seed(NewTask { title: "high undated".into(), no_inbox: true, ..Default::default() });
+        let mut high = seed(NewTask {
+            title: "high undated".into(),
+            no_inbox: true,
+            ..Default::default()
+        });
         high.priority = Priority::High;
         let mut p = crate::model::TaskPatch::default();
         p.priority = crate::model::Patch::Set(Priority::High);
@@ -214,9 +233,18 @@ mod tests {
 
         let today_v = for_view(&tasks, TaskView::Today, t);
         let titles: Vec<&str> = today_v.iter().map(|x| x.title.as_str()).collect();
-        assert!(titles.contains(&"overdue"), "overdue due date pulls into today: {titles:?}");
-        assert!(titles.contains(&"resurface"), "reminder hit pulls into today: {titles:?}");
-        assert!(!titles.contains(&"deferred overdue"), "deferred task hidden until defer_until");
+        assert!(
+            titles.contains(&"overdue"),
+            "overdue due date pulls into today: {titles:?}"
+        );
+        assert!(
+            titles.contains(&"resurface"),
+            "reminder hit pulls into today: {titles:?}"
+        );
+        assert!(
+            !titles.contains(&"deferred overdue"),
+            "deferred task hidden until defer_until"
+        );
         assert!(!titles.contains(&"future"));
 
         let upcoming = for_view(&tasks, TaskView::Upcoming, t);
@@ -265,17 +293,28 @@ mod tests {
         assert!(hits.is_empty(), "archived excluded by default");
         let hits = search(&tasks, "gone", true);
         assert_eq!(hits.len(), 1);
-        assert!(search(&tasks, "   ", false).is_empty(), "blank query matches nothing");
+        assert!(
+            search(&tasks, "   ", false).is_empty(),
+            "blank query matches nothing"
+        );
     }
 
     #[test]
     fn filter_chain() {
         let tasks = setup();
         let base = for_view(&tasks, TaskView::All, today());
-        let f = ListFilter { priority: Some(Priority::High), ..Default::default() }.apply(base);
+        let f = ListFilter {
+            priority: Some(Priority::High),
+            ..Default::default()
+        }
+        .apply(base);
         assert!(f.iter().all(|t| t.priority == Priority::High));
         assert!(f.iter().any(|t| t.title == "high undated"));
-        let f = ListFilter { limit: Some(2), ..Default::default() }.apply(for_view(&tasks, TaskView::All, today()));
+        let f = ListFilter {
+            limit: Some(2),
+            ..Default::default()
+        }
+        .apply(for_view(&tasks, TaskView::All, today()));
         assert_eq!(f.len(), 2);
     }
 

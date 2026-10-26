@@ -61,7 +61,11 @@ pub fn show_task(cli: &Cli, task: &Task) {
     if !task.tags.is_empty() {
         println!("tags       {}", task.tags.join(", "));
     }
-    for (label, d) in [("due", task.due), ("remind", task.remind), ("defer", task.defer_until)] {
+    for (label, d) in [
+        ("due", task.due),
+        ("remind", task.remind),
+        ("defer", task.defer_until),
+    ] {
         if let Some(d) = d {
             println!("{label:<10} {d}");
         }

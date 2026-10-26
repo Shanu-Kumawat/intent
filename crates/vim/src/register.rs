@@ -36,7 +36,10 @@ pub struct Register {
 
 impl Register {
     pub fn charwise(text: impl Into<String>) -> Register {
-        Register { linewise: false, text: text.into() }
+        Register {
+            linewise: false,
+            text: text.into(),
+        }
     }
 
     pub fn linewise(text: impl Into<String>) -> Register {
@@ -44,6 +47,9 @@ impl Register {
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }
-        Register { linewise: true, text }
+        Register {
+            linewise: true,
+            text,
+        }
     }
 }

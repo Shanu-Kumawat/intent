@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Intent
+GenericName=Task Manager
+Comment=Keyboard-first, local-first commitment tracking
+Exec=intent-gui
+TryExec=intent-gui
+Icon=intent
+Terminal=false
+Categories=Office;ProjectManagement;
+Keywords=task;todo;intent;vim;keyboard;local-first;
+StartupWMClass=intent-gui
+StartupNotify=true

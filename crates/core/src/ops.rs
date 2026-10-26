@@ -23,10 +23,20 @@ pub struct OpOutcome {
 
 impl OpOutcome {
     fn unchanged(task: Task) -> OpOutcome {
-        OpOutcome { task: Some(task), change: None }
+        OpOutcome {
+            task: Some(task),
+            change: None,
+        }
     }
     fn changed(before: Task, after: Task) -> OpOutcome {
-        OpOutcome { task: Some(after.clone()), change: Some(RowChange { id: before.id.clone(), before: Some(before), after: Some(after) }) }
+        OpOutcome {
+            task: Some(after.clone()),
+            change: Some(RowChange {
+                id: before.id.clone(),
+                before: Some(before),
+                after: Some(after),
+            }),
+        }
     }
 }
 
@@ -57,7 +67,11 @@ pub fn add(store: &Store, spec: NewTask) -> Result<OpOutcome> {
     };
     store.insert_task(&task)?;
     Ok(OpOutcome {
-        change: Some(RowChange { id: task.id.clone(), before: None, after: Some(task.clone()) }),
+        change: Some(RowChange {
+            id: task.id.clone(),
+            before: None,
+            after: Some(task.clone()),
+        }),
         task: Some(task),
     })
 }
@@ -139,8 +153,10 @@ pub fn unarchive(store: &Store, task_id: &str) -> Result<OpOutcome> {
 
 /// Take a task out of the inbox, optionally assigning a project.
 pub fn organize(store: &Store, task_id: &str, project: Option<&str>) -> Result<OpOutcome> {
-    let mut patch = TaskPatch::default();
-    patch.organize = true;
+    let mut patch = TaskPatch {
+        organize: true,
+        ..Default::default()
+    };
     if let Some(p) = project {
         patch.project = crate::model::Patch::Set(p.to_string());
     }
@@ -148,30 +164,35 @@ pub fn organize(store: &Store, task_id: &str, project: Option<&str>) -> Result<O
 }
 
 pub fn defer(store: &Store, task_id: &str, date: Option<crate::dates::Date>) -> Result<OpOutcome> {
-    let mut patch = TaskPatch::default();
-    patch.defer_until = match date {
-        Some(d) => crate::model::Patch::Set(d),
-        None => crate::model::Patch::Clear,
+    let patch = TaskPatch {
+        defer_until: match date {
+            Some(d) => crate::model::Patch::Set(d),
+            None => crate::model::Patch::Clear,
+        },
+        ..Default::default()
     };
     edit(store, task_id, &patch)
 }
 
 pub fn prioritize(store: &Store, task_id: &str, priority: Priority) -> Result<OpOutcome> {
-    let mut patch = TaskPatch::default();
-    patch.priority = crate::model::Patch::Set(priority);
+    let patch = TaskPatch {
+        priority: crate::model::Patch::Set(priority),
+        ..Default::default()
+    };
     edit(store, task_id, &patch)
 }
 
 /// Permanently delete. Returns false if the id did not exist.
 pub fn delete(store: &Store, task_id: &str) -> Result<Option<OpOutcome>> {
-    let before = match store.get_task(task_id) {
-        Ok(t) => t,
-        Err(e) => return Err(e),
-    };
+    let before = store.get_task(task_id)?;
     store.delete_task(task_id)?;
     Ok(Some(OpOutcome {
         task: None,
-        change: Some(RowChange { id: before.id.clone(), before: Some(before), after: None }),
+        change: Some(RowChange {
+            id: before.id.clone(),
+            before: Some(before),
+            after: None,
+        }),
     }))
 }
 
@@ -210,10 +231,16 @@ mod tests {
     }
 
     fn mk(store: &Store, title: &str) -> Task {
-        add(store, NewTask { title: title.into(), ..Default::default() })
-            .unwrap()
-            .task
-            .unwrap()
+        add(
+            store,
+            NewTask {
+                title: title.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .task
+        .unwrap()
     }
 
     #[test]
@@ -228,8 +255,22 @@ mod tests {
     #[test]
     fn capture_validates_title() {
         let s = store();
-        assert!(add(&s, NewTask { title: "  ".into(), ..Default::default() }).is_err());
-        assert!(add(&s, NewTask { title: "two\nlines".into(), ..Default::default() }).is_err());
+        assert!(add(
+            &s,
+            NewTask {
+                title: "  ".into(),
+                ..Default::default()
+            }
+        )
+        .is_err());
+        assert!(add(
+            &s,
+            NewTask {
+                title: "two\nlines".into(),
+                ..Default::default()
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -263,7 +304,10 @@ mod tests {
         let t = mk(&s, "x");
         let out = defer(&s, &t.id, Some(Date(jiff::civil::date(2026, 12, 1)))).unwrap();
         let after = out.task.unwrap();
-        assert_eq!(after.defer_until.map(|d| d.to_string()), Some("2026-12-01".into()));
+        assert_eq!(
+            after.defer_until.map(|d| d.to_string()),
+            Some("2026-12-01".into())
+        );
         assert!(after.inbox, "deferring alone does not organize");
 
         let change = out.change.unwrap();
@@ -272,7 +316,10 @@ mod tests {
         assert_eq!(reverted.defer_until, None);
         apply_change(&s, &change, true).unwrap();
         let redone = s.get_task(&t.id).unwrap();
-        assert_eq!(redone.defer_until.map(|d| d.to_string()), Some("2026-12-01".into()));
+        assert_eq!(
+            redone.defer_until.map(|d| d.to_string()),
+            Some("2026-12-01".into())
+        );
     }
 
     #[test]
@@ -293,7 +340,10 @@ mod tests {
     fn edit_noop_keeps_updated_at() {
         let s = store();
         let t = mk(&s, "x");
-        let patch = TaskPatch { title: Patch::Set("x".into()), ..Default::default() };
+        let patch = TaskPatch {
+            title: Patch::Set("x".into()),
+            ..Default::default()
+        };
         let out = edit(&s, &t.id, &patch).unwrap();
         assert!(out.change.is_none());
         assert_eq!(out.task.unwrap().updated_at, t.updated_at);

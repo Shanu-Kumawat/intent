@@ -97,32 +97,57 @@ fn capture_organize_focus_complete_retrieve() {
     // Defer it away: Today hides it until the defer date.
     e.ok(&["defer", &id, "+30d"]);
     let today = e.json(&["list", "today", "--json"]);
-    assert_eq!(today.as_array().unwrap().len(), 0, "deferred task leaves Today");
+    assert_eq!(
+        today.as_array().unwrap().len(),
+        0,
+        "deferred task leaves Today"
+    );
     let upcoming = e.json(&["list", "upcoming", "--json"]);
     assert_eq!(upcoming.as_array().unwrap().len(), 1);
 
     // Bring it back by clearing the defer.
     e.ok(&["defer", &id, "none"]);
-    assert_eq!(e.json(&["list", "today", "--json"]).as_array().unwrap().len(), 1);
+    assert_eq!(
+        e.json(&["list", "today", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     // Reminders are distinct from deadlines (both surface in Today).
     let rid = e.add("re-read paper");
     e.ok(&["edit", &rid, "--remind", "tomorrow"]);
     assert_eq!(
-        e.json(&["list", "today", "--json"]).as_array().unwrap().len(),
+        e.json(&["list", "today", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
         1,
         "tomorrow's reminder is not today yet"
     );
 
     // Complete, then retrieve from Completed; reopen restores it.
     e.ok(&["done", &id]);
-    assert_eq!(e.json(&["list", "today", "--json"]).as_array().unwrap().len(), 0);
+    assert_eq!(
+        e.json(&["list", "today", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
     let done = e.json(&["list", "completed", "--json"]);
     assert_eq!(done.as_array().unwrap().len(), 1);
     assert!(done[0]["completed_at"].is_string());
 
     e.ok(&["reopen", &id]);
-    assert_eq!(e.json(&["list", "completed", "--json"]).as_array().unwrap().len(), 0);
+    assert_eq!(
+        e.json(&["list", "completed", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 
     // Search retrieves by content.
     let sid = e.add("buy ferrite rings");
@@ -131,7 +156,13 @@ fn capture_organize_focus_complete_retrieve() {
     assert_eq!(hits.as_array().unwrap().len(), 1);
     let hits = e.json(&["search", "FERRITE rings", "--json"]);
     assert_eq!(hits.as_array().unwrap().len(), 1);
-    assert_eq!(e.json(&["search", "zzz-nope", "--json"]).as_array().unwrap().len(), 0);
+    assert_eq!(
+        e.json(&["search", "zzz-nope", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -139,11 +170,32 @@ fn archive_flow() {
     let e = Env::new("archive");
     let id = e.add("old thing");
     e.ok(&["archive", &id]);
-    assert_eq!(e.json(&["list", "archived", "--json"]).as_array().unwrap().len(), 1);
-    assert_eq!(e.json(&["list", "all", "--json"]).as_array().unwrap().len(), 0);
+    assert_eq!(
+        e.json(&["list", "archived", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        e.json(&["list", "all", "--json"]).as_array().unwrap().len(),
+        0
+    );
     e.ok(&["unarchive", &id]);
-    assert_eq!(e.json(&["list", "archived", "--json"]).as_array().unwrap().len(), 0);
-    assert_eq!(e.json(&["list", "inbox", "--json"]).as_array().unwrap().len(), 1);
+    assert_eq!(
+        e.json(&["list", "archived", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        e.json(&["list", "inbox", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -213,15 +265,36 @@ fn smart_dates_everywhere() {
 fn add_with_metadata_leaves_inbox() {
     let e = Env::new("addmeta");
     e.ok(&["add", "direct to project", "--project", "core"]);
-    assert_eq!(e.json(&["list", "inbox", "--json"]).as_array().unwrap().len(), 0);
-    assert_eq!(e.json(&["list", "all", "--json"]).as_array().unwrap().len(), 1);
+    assert_eq!(
+        e.json(&["list", "inbox", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        e.json(&["list", "all", "--json"]).as_array().unwrap().len(),
+        1
+    );
 
     e.ok(&["add", "plain"]);
-    assert_eq!(e.json(&["list", "inbox", "--json"]).as_array().unwrap().len(), 1);
+    assert_eq!(
+        e.json(&["list", "inbox", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     // --no-inbox forces organized capture.
     e.ok(&["add", "skip inbox", "--no-inbox"]);
-    assert_eq!(e.json(&["list", "inbox", "--json"]).as_array().unwrap().len(), 1);
+    assert_eq!(
+        e.json(&["list", "inbox", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -316,8 +389,20 @@ fn version_and_help() {
     assert!(out.status.success());
     let help = e.ok(&["--help"]);
     for cmd in [
-        "add", "list", "show", "edit", "done", "reopen", "defer", "prioritize", "archive",
-        "unarchive", "organize", "delete", "search", "counts",
+        "add",
+        "list",
+        "show",
+        "edit",
+        "done",
+        "reopen",
+        "defer",
+        "prioritize",
+        "archive",
+        "unarchive",
+        "organize",
+        "delete",
+        "search",
+        "counts",
     ] {
         assert!(help.contains(cmd), "help mentions {cmd}");
     }

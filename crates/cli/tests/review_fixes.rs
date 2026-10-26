@@ -70,7 +70,13 @@ fn extreme_relative_dates_do_not_panic() {
     let t: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(t["due"], "9999-12-31");
 
-    let out = e.run(&["add", "span overflow weeks", "--due", "+1152921504606846976w", "--json"]);
+    let out = e.run(&[
+        "add",
+        "span overflow weeks",
+        "--due",
+        "+1152921504606846976w",
+        "--json",
+    ]);
     assert_eq!(out.status.code(), Some(0));
     let t: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(t["due"], "9999-12-31");

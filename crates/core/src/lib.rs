@@ -16,4 +16,4 @@ pub use jiff::Timestamp;
 pub use model::{NewTask, Patch, Priority, Status, Task, TaskPatch, TaskView, ALL_VIEWS};
 pub use ops::{apply_change, RowChange};
 pub use store::Store;
-pub use views::{for_view, search, counts, ListFilter};
+pub use views::{counts, for_view, search, ListFilter};

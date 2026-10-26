@@ -1,4 +1,5 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use std::io::Write;
 
 mod output;
 mod run;
@@ -35,7 +36,11 @@ enum Cmd {
         notes: Option<String>,
         #[arg(long, allow_hyphen_values = true, help = "Due date (deadline)")]
         due: Option<String>,
-        #[arg(long, allow_hyphen_values = true, help = "Resurface date (soft reminder)")]
+        #[arg(
+            long,
+            allow_hyphen_values = true,
+            help = "Resurface date (soft reminder)"
+        )]
         remind: Option<String>,
         #[arg(long, help = "none|low|medium|high (aliases -/l/m/h)")]
         priority: Option<String>,
@@ -70,11 +75,23 @@ enum Cmd {
         title: Option<String>,
         #[arg(long)]
         notes: Option<String>,
-        #[arg(long, allow_hyphen_values = true, help = "Set due (a date, or none/- to clear)")]
+        #[arg(
+            long,
+            allow_hyphen_values = true,
+            help = "Set due (a date, or none/- to clear)"
+        )]
         due: Option<String>,
-        #[arg(long, allow_hyphen_values = true, help = "Set remind (a date, or none/- to clear)")]
+        #[arg(
+            long,
+            allow_hyphen_values = true,
+            help = "Set remind (a date, or none/- to clear)"
+        )]
         remind: Option<String>,
-        #[arg(long, allow_hyphen_values = true, help = "Set defer-until (a date, or none/- to clear)")]
+        #[arg(
+            long,
+            allow_hyphen_values = true,
+            help = "Set defer-until (a date, or none/- to clear)"
+        )]
         defer_until: Option<String>,
         #[arg(long)]
         priority: Option<String>,
@@ -94,7 +111,10 @@ enum Cmd {
     /// Defer: hide from Today until DATE (or `none` to clear)
     Defer {
         id: String,
-        #[arg(allow_hyphen_values = true, help = "A date (SPEC §1.4), or none/- to clear")]
+        #[arg(
+            allow_hyphen_values = true,
+            help = "A date (SPEC §1.4), or none/- to clear"
+        )]
         date: String,
     },
     /// Set priority: none|low|medium|high
@@ -123,9 +143,37 @@ enum Cmd {
     },
     /// Per-view task counts
     Counts,
+    /// Emit a shell completion script (bash, zsh, or fish) on stdout
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 fn main() {
+    // Completions bypass the database entirely and never touch --json.
+    if std::env::args().nth(1).as_deref() == Some("completions") {
+        match Cli::try_parse() {
+            Ok(Cli {
+                command: Cmd::Completions { shell },
+                ..
+            }) => {
+                // Buffer first: writing straight to stdout panics inside
+                // clap_complete if the pipe closes early (e.g. `| head`).
+                let mut buf = Vec::new();
+                let mut cmd = Cli::command();
+                clap_complete::generate(shell, &mut cmd, "intent", &mut buf);
+                let _ = std::io::stdout().write_all(&buf);
+                return;
+            }
+            Err(err) => {
+                let _ = err.print();
+                std::process::exit(err.exit_code());
+            }
+            _ => unreachable!("first arg is completions"),
+        }
+    }
     let cli = match Cli::try_parse() {
         Ok(c) => c,
         Err(err) => {

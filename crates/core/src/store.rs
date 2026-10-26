@@ -84,9 +84,11 @@ impl Store {
         )?;
         let version: Option<String> = self
             .conn
-            .query_row("SELECT value FROM meta WHERE key='schema_version'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .optional()?;
         match version {
             None => {
@@ -115,7 +117,9 @@ impl Store {
     /// Monotonic counter that changes when another connection commits.
     /// Used by the GUI to detect external writes (SPEC §2).
     pub fn data_version(&self) -> Result<u64> {
-        let v: i64 = self.conn.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+        let v: i64 = self
+            .conn
+            .query_row("PRAGMA data_version", [], |r| r.get(0))?;
         Ok(v as u64)
     }
 
@@ -180,13 +184,17 @@ impl Store {
     }
 
     pub fn delete_task(&self, id: &str) -> Result<bool> {
-        let n = self.conn.execute("DELETE FROM tasks WHERE id=?1", params![id])?;
+        let n = self
+            .conn
+            .execute("DELETE FROM tasks WHERE id=?1", params![id])?;
         Ok(n > 0)
     }
 
     /// All tasks, any status. Views/search filter on top of this (SPEC §1.3).
     pub fn all_tasks(&self) -> Result<Vec<Task>> {
-        let mut stmt = self.conn.prepare("SELECT * FROM tasks ORDER BY created_at, id")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM tasks ORDER BY created_at, id")?;
         let rows = stmt.query_map([], row_to_task)?;
         let mut out = Vec::new();
         for r in rows {
@@ -229,7 +237,10 @@ fn parse_ts(s: &str) -> Timestamp {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME").ok().filter(|s| !s.is_empty()).map(PathBuf::from)
+    std::env::var("HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -305,7 +316,10 @@ mod tests {
         // Safety: test manipulates the process env; restore afterwards.
         let saved = std::env::var("INTENT_DB").ok();
         std::env::set_var("INTENT_DB", "/tmp/intent-test-override.db");
-        assert_eq!(Store::default_path(), PathBuf::from("/tmp/intent-test-override.db"));
+        assert_eq!(
+            Store::default_path(),
+            PathBuf::from("/tmp/intent-test-override.db")
+        );
         // Empty INTENT_DB is treated as unset (SQLite temp-db hazard, SPEC §2).
         std::env::set_var("INTENT_DB", "");
         let p = Store::default_path();

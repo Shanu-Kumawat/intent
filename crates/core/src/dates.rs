@@ -11,20 +11,22 @@ use crate::error::{bad_value, CoreError, Result};
 pub struct Date(pub jiff::civil::Date);
 
 impl Date {
-    pub fn to_string(self) -> String {
-        self.0.to_string()
-    }
-
     /// Arithmetic saturates at the calendar bounds (year 1 .. 9999) instead
     /// of panicking — user-supplied offsets like `+999999y` are clamped.
     /// Inputs are also clamped inside jiff's Span parameter ranges (which
     /// themselves panic when exceeded), well beyond any reachable date.
     pub fn add_days(self, days: i64) -> Date {
-        Date(self.0.saturating_add(days.clamp(-4_000_000, 4_000_000).days()))
+        Date(
+            self.0
+                .saturating_add(days.clamp(-4_000_000, 4_000_000).days()),
+        )
     }
 
     pub fn add_months(self, months: i64) -> Date {
-        Date(self.0.saturating_add(months.clamp(-239_976, 239_976).months()))
+        Date(
+            self.0
+                .saturating_add(months.clamp(-239_976, 239_976).months()),
+        )
     }
 
     pub fn add_years(self, years: i64) -> Date {
@@ -47,13 +49,18 @@ impl fmt::Display for Date {
 }
 
 impl serde::Serialize for Date {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> serde::Deserialize<'de> for Date {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         parse_iso(&s).map_err(serde::de::Error::custom)
     }
@@ -170,7 +177,10 @@ pub fn parse_date(input: &str, today: Date) -> Result<Date> {
 
 /// True when `input` unambiguously means "clear this date" where allowed.
 pub fn is_clear_marker(input: &str) -> bool {
-    matches!(input.trim().to_ascii_lowercase().as_str(), "none" | "-" | "")
+    matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "none" | "-" | ""
+    )
 }
 
 pub fn parse_priority(input: &str) -> Result<crate::model::Priority> {
@@ -201,8 +211,14 @@ mod tests {
 
     #[test]
     fn iso_dates() {
-        assert_eq!(parse_date("2026-11-02", t()).unwrap(), Date(date(2026, 11, 2)));
-        assert_eq!(parse_date(" 2026-11-02 ", t()).unwrap(), Date(date(2026, 11, 2)));
+        assert_eq!(
+            parse_date("2026-11-02", t()).unwrap(),
+            Date(date(2026, 11, 2))
+        );
+        assert_eq!(
+            parse_date(" 2026-11-02 ", t()).unwrap(),
+            Date(date(2026, 11, 2))
+        );
         assert!(parse_date("2026-13-02", t()).is_err());
         assert!(parse_date("20261102", t()).is_err());
     }

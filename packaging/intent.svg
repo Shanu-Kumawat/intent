@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Intent logo: a black sharp-cornered rectangle carrying a white geometric
+  "In" mark. The letterforms are drawn by hand as SVG paths (no font
+  dependency): the I is a solid vertical bar, the n is a stem with a squared
+  shoulder arch. The n's arch deliberately extends to the right edge of its
+  bounding box and is cut flat — the "unfinished stroke" reads as a
+  commitment still being carried out: intent, in progress.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- black plate -->
+  <rect x="0" y="0" width="512" height="512" fill="#000000"/>
+  <!-- hairline inset frame: crisp boundary, part of the identity -->
+  <rect x="10" y="10" width="492" height="492" fill="none" stroke="#ffffff" stroke-width="4"/>
+
+  <!--
+    Mark construction on a 512-grid, baseline y=384, cap height 256 (y=128).
+    Stroke weight 56. Letter widths: I = 56, gap = 52, n = 160.
+    Total mark width = 268; centered horizontally: x from 122 to 390.
+  -->
+
+  <!-- I : solid bar from cap height to baseline -->
+  <rect x="122" y="128" width="56" height="256" fill="#ffffff"/>
+
+  <!-- n : stem + squared shoulder, open baseline, flat-cut right arm -->
+  <path d="M 230 384
+           L 230 176
+           L 230 170
+           Q 230 128 272 128
+           L 334 128
+           Q 390 128 390 190
+           L 390 384
+           L 334 384
+           L 334 196
+           Q 334 184 322 184
+           L 286 184
+           Q 286 184 286 196
+           L 286 384
+           Z"
+        fill="#ffffff"/>
+</svg>

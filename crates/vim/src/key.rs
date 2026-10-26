@@ -12,15 +12,27 @@ pub struct Key {
 
 impl Key {
     pub fn new(key: &str) -> Key {
-        Key { key: key.to_string(), ctrl: false, shift: false }
+        Key {
+            key: key.to_string(),
+            ctrl: false,
+            shift: false,
+        }
     }
 
     pub fn ctrl(key: &str) -> Key {
-        Key { key: key.to_string(), ctrl: true, shift: false }
+        Key {
+            key: key.to_string(),
+            ctrl: true,
+            shift: false,
+        }
     }
 
     pub fn shifted(key: &str) -> Key {
-        Key { key: key.to_string(), ctrl: false, shift: true }
+        Key {
+            key: key.to_string(),
+            ctrl: false,
+            shift: true,
+        }
     }
 
     /// The command character: a single-char key, uppercased when shift is
@@ -60,7 +72,9 @@ impl Key {
     /// Compact display for the status line, e.g. `2diw`, `f`, `ctrl-r`.
     pub fn display(&self) -> String {
         let base = if self.key.len() == 1 {
-            self.chr().map(|c| c.to_string()).unwrap_or_else(|| self.key.clone())
+            self.chr()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| self.key.clone())
         } else {
             self.key.clone()
         };

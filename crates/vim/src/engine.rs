@@ -61,16 +61,30 @@ enum Motion {
     Right,
     Up,
     Down,
-    WordStart { big: bool },
-    WordBack { big: bool },
-    WordEnd { big: bool },
+    WordStart {
+        big: bool,
+    },
+    WordBack {
+        big: bool,
+    },
+    WordEnd {
+        big: bool,
+    },
     LineCol0,
     FirstNonBlank,
     LineEnd,
     /// gg/G. `line` is 1-based; None means "count" (G default last, gg first).
-    GotoLine { line: Option<usize> },
-    Find { fwd: bool, till: bool, ch: char },
-    FindRepeat { reverse: bool },
+    GotoLine {
+        line: Option<usize>,
+    },
+    Find {
+        fwd: bool,
+        till: bool,
+        ch: char,
+    },
+    FindRepeat {
+        reverse: bool,
+    },
 }
 
 impl Motion {
@@ -99,28 +113,54 @@ enum Target {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Cmd {
-    Move { count: usize, motion: Motion },
-    Op { count: usize, op: OpKind, target: Target },
-    EnterInsert { kind: InsertKind },
-    DeleteChars { count: usize, fwd: bool },
-    ReplaceChar { count: usize, ch: char },
-    ToggleCase { count: usize },
-    Join { count: usize },
-    Paste { count: usize, after: bool },
+    Move {
+        count: usize,
+        motion: Motion,
+    },
+    Op {
+        count: usize,
+        op: OpKind,
+        target: Target,
+    },
+    EnterInsert {
+        kind: InsertKind,
+    },
+    DeleteChars {
+        count: usize,
+        fwd: bool,
+    },
+    ReplaceChar {
+        count: usize,
+        ch: char,
+    },
+    ToggleCase {
+        count: usize,
+    },
+    Join {
+        count: usize,
+    },
+    Paste {
+        count: usize,
+        after: bool,
+    },
     Undo,
     Redo,
-    Repeat { count: usize },
-    ToggleVisual { linewise: bool },
+    Repeat {
+        count: usize,
+    },
+    ToggleVisual {
+        linewise: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InsertKind {
-    Before,     // i
-    After,      // a
-    LineStart,  // I
-    LineEnd,    // A (also o/O in single-line buffers)
-    OpenBelow,  // o
-    OpenAbove,  // O
+    Before,    // i
+    After,     // a
+    LineStart, // I
+    LineEnd,   // A (also o/O in single-line buffers)
+    OpenBelow, // o
+    OpenAbove, // O
 }
 
 enum Parse {
@@ -398,7 +438,11 @@ impl Engine {
                     self.cursor = (l, self.buf.line_len(l));
                 } else {
                     self.begin_change();
-                    let at = if kind == InsertKind::OpenBelow { l + 1 } else { l };
+                    let at = if kind == InsertKind::OpenBelow {
+                        l + 1
+                    } else {
+                        l
+                    };
                     self.buf.lines.insert(at, Vec::new());
                     self.cursor = (at, 0);
                 }
@@ -464,7 +508,11 @@ impl Engine {
                 {
                     self.mode = Mode::Normal;
                 } else {
-                    self.mode = if linewise { Mode::VisualLine } else { Mode::Visual };
+                    self.mode = if linewise {
+                        Mode::VisualLine
+                    } else {
+                        Mode::Visual
+                    };
                 }
                 self.anchor = self.cursor;
             }
@@ -551,9 +599,7 @@ impl Engine {
                         next.remove(0);
                     }
                     let cur = &mut self.buf.lines[l];
-                    if !cur.is_empty()
-                        && !cur.last().map(|c| c.is_whitespace()).unwrap_or(false)
-                    {
+                    if !cur.is_empty() && !cur.last().map(|c| c.is_whitespace()).unwrap_or(false) {
                         cur.push(' ');
                     }
                     cur.extend(next);
@@ -574,13 +620,21 @@ impl Engine {
                 self.begin_change();
                 let text = reg.text.repeat(count.max(1));
                 if reg.linewise {
-                    let at = if after { self.cursor.0 + 1 } else { self.cursor.0 };
+                    let at = if after {
+                        self.cursor.0 + 1
+                    } else {
+                        self.cursor.0
+                    };
                     self.buf.insert_lines(at, &text);
                     let line = at.min(self.buf.line_count() - 1);
                     self.cursor = (line, self.buf.first_non_blank(line));
                 } else {
                     let (l, c) = self.cursor;
-                    let at = if after && self.buf.line_len(l) > 0 { (l, c + 1) } else { (l, c) };
+                    let at = if after && self.buf.line_len(l) > 0 {
+                        (l, c + 1)
+                    } else {
+                        (l, c)
+                    };
                     self.cursor = self.buf.insert_text(at, &text);
                 }
                 changed = true;
@@ -661,8 +715,7 @@ impl Engine {
                 self.sync_desired();
             }
             Motion::LineEnd => {
-                let line = (self.cursor.0 + count.saturating_sub(1))
-                    .min(self.buf.line_count() - 1);
+                let line = (self.cursor.0 + count.saturating_sub(1)).min(self.buf.line_count() - 1);
                 self.cursor.0 = line;
                 self.cursor.1 = self.line_last_col_at(line);
                 self.sync_desired();
@@ -740,7 +793,12 @@ impl Engine {
         let (l, c) = self.cursor;
         let line: Vec<char> = self.buf.lines[l].clone();
         let target = if fwd {
-            let mut hits = line.iter().enumerate().filter(|(_, &x)| x == ch).map(|(i, _)| i).filter(|&i| i > c);
+            let mut hits = line
+                .iter()
+                .enumerate()
+                .filter(|(_, &x)| x == ch)
+                .map(|(i, _)| i)
+                .filter(|&i| i > c);
             let mut found = None;
             for _ in 0..count {
                 match hits.next() {
@@ -750,8 +808,13 @@ impl Engine {
             }
             found.map(|i| if till { i - 1 } else { i })
         } else {
-            let mut hits: Vec<usize> =
-                line.iter().enumerate().filter(|(_, &x)| x == ch).map(|(i, _)| i).filter(|&i| i < c).collect();
+            let mut hits: Vec<usize> = line
+                .iter()
+                .enumerate()
+                .filter(|(_, &x)| x == ch)
+                .map(|(i, _)| i)
+                .filter(|&i| i < c)
+                .collect();
             hits.reverse();
             let mut found = None;
             for _ in 0..count {
@@ -805,9 +868,10 @@ impl Engine {
 
     fn do_op(&mut self, count: usize, op: OpKind, target: Target, keys: &[Key]) -> bool {
         let region = match target {
-            Target::Lines => {
-                Some(Region::lines(self.cursor.0, self.cursor.0 + count.max(1) - 1))
-            }
+            Target::Lines => Some(Region::lines(
+                self.cursor.0,
+                self.cursor.0 + count.max(1) - 1,
+            )),
             Target::TextObj { inner, obj } => self.text_object(inner, obj),
             Target::Motion(m) => {
                 // Vim rule: cw behaves like ce when starting on a non-blank.
@@ -945,9 +1009,9 @@ impl Engine {
         match obj {
             'w' | 'W' => {
                 let big = obj == 'W';
-                let class = match self.buf.char_at(self.cursor) {
-                    Some(c) => char_class(c, big),
-                    None => return None,
+                let class = {
+                    let c = self.buf.char_at(self.cursor)?;
+                    char_class(c, big)
                 };
                 let mut a = self.cursor;
                 let mut b = self.cursor;
@@ -1001,7 +1065,11 @@ impl Engine {
                 let q = obj;
                 let (l, c) = self.cursor;
                 let line = &self.buf.lines[l];
-                let bound = if line.is_empty() { 0 } else { c.min(line.len() - 1) };
+                let bound = if line.is_empty() {
+                    0
+                } else {
+                    c.min(line.len() - 1)
+                };
                 let open = line[..=bound].iter().rposition(|&x| x == q)?;
                 let close = line[(open + 1)..].iter().position(|&x| x == q)? + open + 1;
                 if inner {
@@ -1191,7 +1259,11 @@ impl Engine {
                 {
                     self.mode = Mode::Normal;
                 } else {
-                    self.mode = if linewise { Mode::VisualLine } else { Mode::Visual };
+                    self.mode = if linewise {
+                        Mode::VisualLine
+                    } else {
+                        Mode::Visual
+                    };
                 }
             }
             VisualCmd::ToggleCase => {
@@ -1378,11 +1450,15 @@ struct Region {
 
 impl Region {
     fn char(start: Pos, end: Pos) -> Region {
-        Region { kind: RegionKind::Char { start, end } }
+        Region {
+            kind: RegionKind::Char { start, end },
+        }
     }
 
     fn lines(from: usize, to: usize) -> Region {
-        Region { kind: RegionKind::Line { from, to } }
+        Region {
+            kind: RegionKind::Line { from, to },
+        }
     }
 }
 
@@ -1582,11 +1658,23 @@ fn word_end(buf: &Buffer, from: Pos, big: bool) -> Option<Pos> {
     }
 }
 
-fn find_in_line(buf: &Buffer, cursor: Pos, count: usize, fwd: bool, till: bool, ch: char) -> Option<Pos> {
+fn find_in_line(
+    buf: &Buffer,
+    cursor: Pos,
+    count: usize,
+    fwd: bool,
+    till: bool,
+    ch: char,
+) -> Option<Pos> {
     let (l, c) = cursor;
     let line = &buf.lines[l];
     if fwd {
-        let mut hits = line.iter().enumerate().filter(|(_, &x)| x == ch).map(|(i, _)| i).filter(|&i| i > c);
+        let mut hits = line
+            .iter()
+            .enumerate()
+            .filter(|(_, &x)| x == ch)
+            .map(|(i, _)| i)
+            .filter(|&i| i > c);
         let mut found = None;
         for _ in 0..count.max(1) {
             match hits.next() {
@@ -1596,7 +1684,13 @@ fn find_in_line(buf: &Buffer, cursor: Pos, count: usize, fwd: bool, till: bool, 
         }
         found.map(|i| (l, if till && i > 0 { i - 1 } else { i }))
     } else {
-        let mut hits: Vec<usize> = line.iter().enumerate().filter(|(_, &x)| x == ch).map(|(i, _)| i).filter(|&i| i < c).collect();
+        let mut hits: Vec<usize> = line
+            .iter()
+            .enumerate()
+            .filter(|(_, &x)| x == ch)
+            .map(|(i, _)| i)
+            .filter(|&i| i < c)
+            .collect();
         hits.reverse();
         let mut found = None;
         for _ in 0..count.max(1) {
@@ -1610,7 +1704,11 @@ fn find_in_line(buf: &Buffer, cursor: Pos, count: usize, fwd: bool, till: bool, 
 }
 
 fn step_while(buf: &Buffer, p: Pos, class: CharClass, fwd: bool) -> Option<Pos> {
-    let q = if fwd { buf.pos_after(p) } else { buf.pos_before(p) };
+    let q = if fwd {
+        buf.pos_after(p)
+    } else {
+        buf.pos_before(p)
+    };
     if q == p {
         return None;
     }
@@ -1714,7 +1812,10 @@ fn parse(keys: &[Key]) -> Parse {
             "up" => Motion::Up,
             _ => Motion::Down,
         };
-        return Parse::Ready(Cmd::Move { count: count1.unwrap_or(1), motion });
+        return Parse::Ready(Cmd::Move {
+            count: count1.unwrap_or(1),
+            motion,
+        });
     }
     if keys[i].ctrl {
         if keys[i].key == "r" && count1.is_none() && keys.len() == i + 1 {
@@ -1738,7 +1839,11 @@ fn parse(keys: &[Key]) -> Parse {
         // Doubled operator: dd / cc / yy
         if keys[j].chr() == Some(c) {
             return if j + 1 == keys.len() {
-                Parse::Ready(Cmd::Op { count: total, op: op_kind(c), target: Target::Lines })
+                Parse::Ready(Cmd::Op {
+                    count: total,
+                    op: op_kind(c),
+                    target: Target::Lines,
+                })
             } else {
                 Parse::Invalid
             };
@@ -1752,7 +1857,10 @@ fn parse(keys: &[Key]) -> Parse {
                 Some(obj) if "wW\"'`()b".contains(obj) => Parse::Ready(Cmd::Op {
                     count: total,
                     op: op_kind(c),
-                    target: Target::TextObj { inner: keys[j].chr() == Some('i'), obj },
+                    target: Target::TextObj {
+                        inner: keys[j].chr() == Some('i'),
+                        obj,
+                    },
                 }),
                 _ => Parse::Invalid,
             };
@@ -1769,15 +1877,21 @@ fn parse(keys: &[Key]) -> Parse {
                     // the motion itself (d3G → through line 3, d2gg → lines
                     // 1–2), mirroring the plain-Move remap below.
                     let motion = match motion {
-                        Motion::GotoLine { .. } if keys[j].chr() == Some('g') => {
-                            Motion::GotoLine { line: count2.or(count1).or(Some(1)) }
-                        }
+                        Motion::GotoLine { .. } if keys[j].chr() == Some('g') => Motion::GotoLine {
+                            line: count2.or(count1).or(Some(1)),
+                        },
                         Motion::GotoLine { line: None } if keys[j].chr() == Some('G') => {
-                            Motion::GotoLine { line: count1.or(count2) }
+                            Motion::GotoLine {
+                                line: count1.or(count2),
+                            }
                         }
                         m => m,
                     };
-                    Parse::Ready(Cmd::Op { count: total, op: op_kind(c), target: Target::Motion(motion) })
+                    Parse::Ready(Cmd::Op {
+                        count: total,
+                        op: op_kind(c),
+                        target: Target::Motion(motion),
+                    })
                 }
             }
         };
@@ -1811,10 +1925,12 @@ fn parse(keys: &[Key]) -> Parse {
             } else {
                 // gg with a count goes to that line; G to count-th/last.
                 let motion = match motion {
-                    Motion::GotoLine { .. } if c == 'g' => {
-                        Motion::GotoLine { line: count1.or(Some(1)) }
+                    Motion::GotoLine { .. } if c == 'g' => Motion::GotoLine {
+                        line: count1.or(Some(1)),
+                    },
+                    Motion::GotoLine { line: None } if c == 'G' => {
+                        Motion::GotoLine { line: count1 }
                     }
-                    Motion::GotoLine { line: None } if c == 'G' => Motion::GotoLine { line: count1 },
                     m => m,
                 };
                 Parse::Ready(Cmd::Move { count, motion })
@@ -1825,23 +1941,60 @@ fn parse(keys: &[Key]) -> Parse {
 
 fn simple_command(c: char, count: usize) -> Option<Cmd> {
     Some(match c {
-        'i' => Cmd::EnterInsert { kind: InsertKind::Before },
-        'a' => Cmd::EnterInsert { kind: InsertKind::After },
-        'I' => Cmd::EnterInsert { kind: InsertKind::LineStart },
-        'A' => Cmd::EnterInsert { kind: InsertKind::LineEnd },
-        'o' => Cmd::EnterInsert { kind: InsertKind::OpenBelow },
-        'O' => Cmd::EnterInsert { kind: InsertKind::OpenAbove },
+        'i' => Cmd::EnterInsert {
+            kind: InsertKind::Before,
+        },
+        'a' => Cmd::EnterInsert {
+            kind: InsertKind::After,
+        },
+        'I' => Cmd::EnterInsert {
+            kind: InsertKind::LineStart,
+        },
+        'A' => Cmd::EnterInsert {
+            kind: InsertKind::LineEnd,
+        },
+        'o' => Cmd::EnterInsert {
+            kind: InsertKind::OpenBelow,
+        },
+        'O' => Cmd::EnterInsert {
+            kind: InsertKind::OpenAbove,
+        },
         'x' => Cmd::DeleteChars { count, fwd: true },
         'X' => Cmd::DeleteChars { count, fwd: false },
-        's' => Cmd::Op { count, op: OpKind::Change, target: Target::Motion(Motion::Right) },
-        'S' => Cmd::Op { count, op: OpKind::Change, target: Target::Lines },
-        'D' => Cmd::Op { count: 1, op: OpKind::Delete, target: Target::Motion(Motion::LineEnd) },
-        'C' => Cmd::Op { count: 1, op: OpKind::Change, target: Target::Motion(Motion::LineEnd) },
-        'Y' => Cmd::Op { count, op: OpKind::Yank, target: Target::Lines },
-        'J' => Cmd::Join { count: count.max(1) },
+        's' => Cmd::Op {
+            count,
+            op: OpKind::Change,
+            target: Target::Motion(Motion::Right),
+        },
+        'S' => Cmd::Op {
+            count,
+            op: OpKind::Change,
+            target: Target::Lines,
+        },
+        'D' => Cmd::Op {
+            count: 1,
+            op: OpKind::Delete,
+            target: Target::Motion(Motion::LineEnd),
+        },
+        'C' => Cmd::Op {
+            count: 1,
+            op: OpKind::Change,
+            target: Target::Motion(Motion::LineEnd),
+        },
+        'Y' => Cmd::Op {
+            count,
+            op: OpKind::Yank,
+            target: Target::Lines,
+        },
+        'J' => Cmd::Join {
+            count: count.max(1),
+        },
         '~' => Cmd::ToggleCase { count },
         'p' => Cmd::Paste { count, after: true },
-        'P' => Cmd::Paste { count, after: false },
+        'P' => Cmd::Paste {
+            count,
+            after: false,
+        },
         'u' => Cmd::Undo,
         'v' => Cmd::ToggleVisual { linewise: false },
         'V' => Cmd::ToggleVisual { linewise: true },
@@ -1962,7 +2115,10 @@ fn parse_visual(keys: &[Key]) -> VisualParse {
             } else {
                 match keys[i + 1].chr() {
                     Some(obj) if "wW\"'`()b".contains(obj) => {
-                        VisualParse::Ready(VisualCmd::TextObj { inner: c == 'i', obj })
+                        VisualParse::Ready(VisualCmd::TextObj {
+                            inner: c == 'i',
+                            obj,
+                        })
                     }
                     _ => VisualParse::Invalid,
                 }
@@ -1986,4 +2142,3 @@ enum VisualParse {
     Invalid,
     Ready(VisualCmd),
 }
-

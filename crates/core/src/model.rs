@@ -112,7 +112,8 @@ impl serde::Serialize for Priority {
 impl<'de> serde::Deserialize<'de> for Priority {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(d)?;
-        Priority::parse(&s).ok_or_else(|| serde::de::Error::custom(format!("unknown priority {s:?}")))
+        Priority::parse(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown priority {s:?}")))
     }
 }
 
@@ -227,8 +228,9 @@ impl Task {
 
 /// Field patch used by `edit` and the GUI. `Keep` = don't touch,
 /// `Set(v)` = assign, `Clear` = remove (only valid on optional fields).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Patch<T> {
+    #[default]
     Keep,
     Set(T),
     Clear,
@@ -237,12 +239,6 @@ pub enum Patch<T> {
 impl<T> Patch<T> {
     pub fn is_keep(&self) -> bool {
         matches!(self, Patch::Keep)
-    }
-}
-
-impl<T> Default for Patch<T> {
-    fn default() -> Self {
-        Patch::Keep
     }
 }
 
@@ -285,18 +281,16 @@ impl TaskPatch {
     /// Apply the patch in place. Returns true if anything changed.
     pub fn apply(&self, task: &mut Task) -> bool {
         let before = task.clone();
-        match &self.title {
-            Patch::Set(t) => task.title = t.clone(),
-            _ => {}
+        if let Patch::Set(t) = &self.title {
+            task.title = t.clone()
         }
         match &self.notes {
             Patch::Set(n) => task.notes = n.clone(),
             Patch::Clear => task.notes = String::new(),
             Patch::Keep => {}
         }
-        match self.priority {
-            Patch::Set(p) => task.priority = p,
-            _ => {}
+        if let Patch::Set(p) = self.priority {
+            task.priority = p
         }
         match &self.project {
             Patch::Set(p) if p.is_empty() => task.project = None,
@@ -304,9 +298,8 @@ impl TaskPatch {
             Patch::Clear => task.project = None,
             Patch::Keep => {}
         }
-        match &self.tags {
-            Patch::Set(t) => task.tags = t.clone(),
-            _ => {}
+        if let Patch::Set(t) = &self.tags {
+            task.tags = t.clone()
         }
         match self.due {
             Patch::Set(d) => task.due = Some(d),
@@ -411,9 +404,7 @@ mod tests {
         assert!(t.inbox, "priority alone must not clear inbox");
 
         let mut p = TaskPatch::default();
-        p.due = Patch::Set(crate::dates::Date(
-            jiff::civil::date(2026, 11, 2),
-        ));
+        p.due = Patch::Set(crate::dates::Date(jiff::civil::date(2026, 11, 2)));
         p.apply(&mut t);
         assert!(!t.inbox, "setting due clears inbox");
         assert_eq!(t.due.map(|d| d.to_string()), Some("2026-11-02".into()));

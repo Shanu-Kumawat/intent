@@ -191,16 +191,19 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
                     )));
                 }
             }
-            ops::delete(&store, id)?
-                .ok_or_else(|| CoreError::NotFound(id.to_string()))?;
+            ops::delete(&store, id)?.ok_or_else(|| CoreError::NotFound(id.to_string()))?;
             output::deleted(cli, id);
         }
         Cmd::Search { query, limit } => {
-            let filter = ListFilter { limit: *limit, ..Default::default() };
+            let filter = ListFilter {
+                limit: *limit,
+                ..Default::default()
+            };
             let tasks = intent_core::views::search(&store.all_tasks()?, query, false);
             let tasks = filter.apply(tasks);
             output::task_list(cli, TaskView::All, &tasks);
         }
+        Cmd::Completions { .. } => unreachable!("handled before dispatch in main"),
         Cmd::Counts => {
             let counts = intent_core::views::counts(&store.all_tasks()?, today());
             output::counts(cli, &counts);

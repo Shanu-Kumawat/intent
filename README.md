@@ -29,10 +29,35 @@ personal commitment-management system — not a todo app with shortcuts bolted o
 
 ---
 
+## Install
+
+Requires a Rust toolchain; the GUI additionally needs `clang`, `cmake`, and
+`pkgconf` (GPUI's build deps) plus Wayland/X11 and Vulkan runtime libraries —
+on Arch all of this is `rust clang cmake pkgconf`.
+
+```sh
+make build          # cargo build --release --locked
+make test           # full workspace test suite
+make install        # user-local: ~/.local/{bin,share/...} — no root needed
+```
+
+`make install` never compiles; it installs the release binaries, man pages,
+shell completions (bash, zsh, fish), a desktop entry, and the icon. Remove
+everything with `make uninstall`.
+
+**System-wide, if you really want it:** `sudo make install PREFIX=/usr/local`.
+On a personal machine this buys nothing over `~/.local` and needs sudo on
+every update.
+
+**Switching to a package later:** when the AUR package exists
+(see `packaging/PKGBUILD.draft`), run `make uninstall` first — both
+`~/.local/bin` and `/usr/local/bin` shadow `/usr/bin` in PATH, and
+`intent --version` will tell you which binary is winning if in doubt.
+
 ## Quick start
 
 ```sh
-cargo build --release
+intent --help
 ```
 
 **CLI:**
@@ -124,7 +149,8 @@ $ intent show k3x9qa --json | jq -r .due
 - The task JSON field set is a stable contract (see SPEC §3).
 
 Run `intent --help` for the full surface. `intent counts --json` gives
-per-view totals cheaply.
+per-view totals cheaply, and `intent completions bash|zsh|fish` prints a
+completion script (installed automatically by `make install`).
 
 ---
 
@@ -168,13 +194,18 @@ real binary.
 - [crates/vim](crates/vim) — modal engine
 - [crates/cli](crates/cli) — CLI
 - [crates/gui](crates/gui) — GPUI app
+- [docs/](docs) — man pages (`intent(1)`, `intent-gui(1)`)
+- [packaging/](packaging) — desktop entry, logo, and `PKGBUILD.draft` for the
+  future AUR package
+- `scripts/spec_verify.py` — 37-check runtime conformance suite against SPEC
 - `vendor/xattr` — patched copy of `xattr 0.2.3` (build fix for `libc ≥
   0.2.191`, wired via `[patch.crates-io]`)
 
 ## Testing
 
 ```sh
-cargo test            # 105 tests across all crates
+make test             # full suite (124 tests across all crates)
+make check            # tests + cargo fmt --check + clippy -D warnings
 ```
 
 ## Non-goals

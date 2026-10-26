@@ -10,7 +10,7 @@ use intent_core::dates::{is_clear_marker, parse_date};
 use intent_core::model::{Patch, Priority, Status, Task, TaskPatch, TaskView};
 use intent_core::ops::{self, RowChange};
 use intent_core::views::{counts, for_view, search};
-use intent_core::{Store, NewTask};
+use intent_core::{NewTask, Store};
 
 use crate::keys;
 use intent_vim::{Clipboard, Engine, EngineEvent, Key, Register};
@@ -246,7 +246,12 @@ impl GuiState {
     // ---- prompts -----------------------------------------------------------------
 
     fn open_prompt(&mut self, kind: PromptKind, target_id: Option<String>) {
-        self.prompt = Some(Prompt { kind, input: String::new(), error: None, target_id });
+        self.prompt = Some(Prompt {
+            kind,
+            input: String::new(),
+            error: None,
+            target_id,
+        });
     }
 
     fn handle_prompt_key(&mut self, key: Key) {
@@ -314,7 +319,10 @@ impl GuiState {
                 }
                 let outcome = ops::add(
                     &self.store,
-                    NewTask { title: title.to_string(), ..Default::default() },
+                    NewTask {
+                        title: title.to_string(),
+                        ..Default::default()
+                    },
                 );
                 match outcome {
                     Ok(out) => {
@@ -461,7 +469,10 @@ impl GuiState {
                 } else {
                     match ops::add(
                         &self.store,
-                        NewTask { title: rest.to_string(), ..Default::default() },
+                        NewTask {
+                            title: rest.to_string(),
+                            ..Default::default()
+                        },
                     ) {
                         Ok(out) => {
                             let t = out.task.unwrap();
@@ -512,11 +523,13 @@ impl GuiState {
             }
             "project" => {
                 if let Some(id) = target_id {
-                    let mut patch = TaskPatch::default();
-                    patch.project = if is_clear_marker(rest) {
-                        Patch::Clear
-                    } else {
-                        Patch::Set(rest.to_string())
+                    let patch = TaskPatch {
+                        project: if is_clear_marker(rest) {
+                            Patch::Clear
+                        } else {
+                            Patch::Set(rest.to_string())
+                        },
+                        ..Default::default()
                     };
                     self.apply_patch(&id, patch, "project set");
                 } else {
@@ -553,8 +566,10 @@ impl GuiState {
                 } else if !tags.iter().any(|t| t == tag) {
                     tags.push(tag.to_string());
                 }
-                let mut patch = TaskPatch::default();
-                patch.tags = Patch::Set(tags);
+                let patch = TaskPatch {
+                    tags: Patch::Set(tags),
+                    ..Default::default()
+                };
                 self.apply_patch(&id, patch, "tags updated");
             }
             "organize" => {
@@ -617,9 +632,28 @@ impl GuiState {
     }
 
     const KNOWN_COMMANDS: &[&str] = &[
-        "inbox", "today", "upcoming", "completed", "archived", "new", "capture", "due",
-        "remind", "defer", "project", "tag", "organize", "archive", "unarchive", "done",
-        "reopen", "delete", "refresh", "help", "q", "w",
+        "inbox",
+        "today",
+        "upcoming",
+        "completed",
+        "archived",
+        "new",
+        "capture",
+        "due",
+        "remind",
+        "defer",
+        "project",
+        "tag",
+        "organize",
+        "archive",
+        "unarchive",
+        "done",
+        "reopen",
+        "delete",
+        "refresh",
+        "help",
+        "q",
+        "w",
     ];
 
     fn is_known_command(cmd: &str) -> bool {
@@ -662,12 +696,18 @@ impl GuiState {
     }
 
     fn switch_editor_field(&mut self, to_title: bool, carry_col: bool) {
-        let Some(ed) = self.editor.as_mut() else { return };
+        let Some(ed) = self.editor.as_mut() else {
+            return;
+        };
         if ed.focus_title == to_title {
             return;
         }
         let (l, c) = ed.focused().cursor();
-        let target = if to_title { &mut ed.title } else { &mut ed.notes };
+        let target = if to_title {
+            &mut ed.title
+        } else {
+            &mut ed.notes
+        };
         let line = l.min(target.buf.line_count() - 1);
         let col = if carry_col { c } else { 0 };
         target.set_cursor((line, col));
@@ -748,7 +788,9 @@ impl GuiState {
             self.set_status("title must not be empty");
             return;
         }
-        let Ok(mut task) = self.store.get_task(task_id) else { return };
+        let Ok(mut task) = self.store.get_task(task_id) else {
+            return;
+        };
         task.title = title;
         task.notes = notes;
         task.updated_at = intent_core::Timestamp::now();
@@ -798,7 +840,9 @@ impl GuiState {
     }
 
     fn pending_is_count_only(&self) -> bool {
-        self.pending.iter().all(|k| k.chr().map(|c| c.is_ascii_digit()).unwrap_or(false))
+        self.pending
+            .iter()
+            .all(|k| k.chr().map(|c| c.is_ascii_digit()).unwrap_or(false))
     }
 
     fn handle_list_key(&mut self, key: Key) {
@@ -984,11 +1028,10 @@ impl GuiState {
                 // Saturate + cap, mirroring the vim engine's parse_count.
                 n = Some(match n {
                     None => d as usize,
-                    Some(prev) => {
-                        prev.saturating_mul(10)
-                            .saturating_add(d as usize)
-                            .min(100_000)
-                    }
+                    Some(prev) => prev
+                        .saturating_mul(10)
+                        .saturating_add(d as usize)
+                        .min(100_000),
                 });
                 consumed += 1;
             } else {
@@ -1096,7 +1139,11 @@ impl GuiState {
 
     fn visual_range(&self) -> (usize, usize) {
         let a = self.visual_anchor.unwrap_or(self.cursor);
-        let (lo, hi) = if a <= self.cursor { (a, self.cursor) } else { (self.cursor, a) };
+        let (lo, hi) = if a <= self.cursor {
+            (a, self.cursor)
+        } else {
+            (self.cursor, a)
+        };
         (lo, hi.min(self.rows.len().saturating_sub(1)))
     }
 
@@ -1146,7 +1193,11 @@ impl GuiState {
         if !changes.is_empty() {
             self.follow_id = Some(changes[0].id.clone());
             self.push_undo_from(changes);
-            self.set_status(if ids.len() == 1 { "completion toggled" } else { "completions toggled" });
+            self.set_status(if ids.len() == 1 {
+                "completion toggled"
+            } else {
+                "completions toggled"
+            });
         }
         self.refresh();
     }
@@ -1207,10 +1258,12 @@ impl GuiState {
             None if delta > 0 => Some(self.today),
             None => None,
         };
-        let mut patch = TaskPatch::default();
-        patch.due = match new_due {
-            Some(d) => Patch::Set(d),
-            None => Patch::Keep, // '<' with no due does nothing
+        let patch = TaskPatch {
+            due: match new_due {
+                Some(d) => Patch::Set(d),
+                None => Patch::Keep, // '<' with no due does nothing
+            },
+            ..Default::default()
         };
         if patch.due.is_keep() {
             self.set_status("no due date to shift");
@@ -1229,8 +1282,10 @@ impl GuiState {
         for _ in 0..count {
             p = if delta > 0 { p.raise() } else { p.lower() };
         }
-        let mut patch = TaskPatch::default();
-        patch.priority = Patch::Set(p);
+        let patch = TaskPatch {
+            priority: Patch::Set(p),
+            ..Default::default()
+        };
         self.apply_patch(&task.id, patch, "priority changed");
         self.last_op = Some(Repeatable::Priority { delta });
     }
@@ -1277,7 +1332,12 @@ impl GuiState {
                 if let Some(change) = out.change {
                     self.push_undo_from(vec![change]);
                 }
-                if self.editor.as_ref().map(|e| e.task_id == id).unwrap_or(false) {
+                if self
+                    .editor
+                    .as_ref()
+                    .map(|e| e.task_id == id)
+                    .unwrap_or(false)
+                {
                     self.editor = None;
                 }
                 self.set_status(format!("deleted {id} (undoable this session)"));

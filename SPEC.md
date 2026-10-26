@@ -195,6 +195,7 @@ intent organize ID [--project P] [--json]
 intent delete ID [--force] [--json]       (see §3.1)
 intent search QUERY [--json] [--limit N]  (= list --query, all non-archived)
 intent counts [--json]                    (view → count map)
+intent completions bash|zsh|fish          (print a completion script; no db access)
 intent help [COMMAND] | --help | --version
 ```
 

@@ -348,7 +348,11 @@ fn yank_writes_clipboard_delete_does_not() {
         "delete never clobbers the system clipboard"
     );
     feed(&mut e, "P");
-    assert_eq!(e.text(), "foo bar\n", "dd P restores; Vim leaves the empty line below");
+    assert_eq!(
+        e.text(),
+        "foo bar\n",
+        "dd P restores; Vim leaves the empty line below"
+    );
 }
 
 #[test]
@@ -469,7 +473,11 @@ fn visual_charwise_delete_yank() {
     let (mut e, ctx) = engine("hello world");
     feed(&mut e, "v 3 l y");
     assert_eq!(e.text(), "hello world");
-    assert_eq!(ctx.clip.read().as_deref(), Some("hell"), "visual yank writes clipboard");
+    assert_eq!(
+        ctx.clip.read().as_deref(),
+        Some("hell"),
+        "visual yank writes clipboard"
+    );
 }
 
 #[test]
@@ -535,7 +543,11 @@ fn no_timeout_semantics() {
     e.handle(Key::new("d"));
     e.handle(Key::new("2"));
     e.handle(Key::new("0"));
-    assert_eq!(e.pending_display(), "d20", "counts accumulate with no timeout");
+    assert_eq!(
+        e.pending_display(),
+        "d20",
+        "counts accumulate with no timeout"
+    );
 }
 
 // ---- single-line (title) -----------------------------------------------------------
@@ -654,7 +666,11 @@ fn undo_does_not_restore_registers() {
     // SPEC §4.5 rule 6: the clipboard is never restored by undo.
     let (mut e, _) = engine("abc def");
     feed(&mut e, "d w u P");
-    assert_eq!(e.text(), "abc abc def", "undo restored text; edit buffer kept the deletion");
+    assert_eq!(
+        e.text(),
+        "abc abc def",
+        "undo restored text; edit buffer kept the deletion"
+    );
 }
 
 #[test]
@@ -663,5 +679,9 @@ fn yank_then_paste_survives_intervening_undo() {
     // undo of x must not touch the register (SPEC §4.5 rule 6).
     let (mut e, _) = engine("abc\ndef");
     feed(&mut e, "x y y u p");
-    assert_eq!(e.text(), "abc\nbc\ndef", "yanked register survived the undo");
+    assert_eq!(
+        e.text(),
+        "abc\nbc\ndef",
+        "yanked register survived the undo"
+    );
 }

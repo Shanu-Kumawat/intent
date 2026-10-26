@@ -1,0 +1,85 @@
+.TH INTENT-GUI 1 "2026-10-26" "intent-gui 0.1.0" "User Commands"
+.SH NAME
+intent-gui \- keyboard-first, local-first task management (GPUI application)
+.SH SYNOPSIS
+.B intent-gui
+.SH DESCRIPTION
+.B intent-gui
+is the desktop interface for Intent: an opinionated, keyboard-first task
+manager with a Vim-like interaction model. It shares the same SQLite database
+as the
+.BR intent (1)
+CLI and reloads within two seconds when the database changes externally.
+.PP
+The window has four surfaces: the task list, the task editor (title + notes,
+full Vim editing), prompts (capture, defer, due, remind, organize, search,
+commands), and a help overlay.
+.SS Keymap essentials
+.TP
+.B j k gg G ctrl-d ctrl-u
+move
+.TP
+.B 1 2 3 4
+switch view (inbox / today / upcoming / completed)
+.TP
+.B tab
+cycle views
+.TP
+.BR o " / " "space space"
+capture
+.TP
+.BR enter " / " i
+edit task
+.TP
+.B x
+complete / reopen / revive
+.TP
+.BR "space d" " / " "space u" " / " "space r"
+defer / due / remind prompts
+.TP
+.B "space o"
+organize
+.TP
+.B > <
+shift due by a day
+.TP
+.B + \-
+raise / lower priority
+.TP
+.B V
+visual (multi-task) mode
+.TP
+.BR d " / " "space D"
+archive / unarchive
+.TP
+.B D
+delete (confirmed, session-undoable)
+.TP
+.BR y " / " Y
+yank title / title+notes
+.TP
+.BR u " / " "ctrl-r"
+undo / redo task operations
+.TP
+.B .
+repeat last operation
+.TP
+.B /
+search
+.TP
+.B :
+command prompt
+.TP
+.B ?
+help overlay
+.PP
+Key sequences never time out; pending keys are always visible in the status
+line and
+.B escape
+cancels. Deleting text never clobbers the system clipboard.
+.SH FILES
+.I ~/.local/share/intent/tasks.db
+(default database; override with
+.BR $INTENT_DB )
+.SH SEE ALSO
+.BR intent (1)

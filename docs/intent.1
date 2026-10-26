@@ -1,0 +1,177 @@
+.TH INTENT 1 "2026-10-26" "intent 0.1.0" "User Commands"
+.SH NAME
+intent \- keyboard-first, local-first task management
+.SH SYNOPSIS
+.B intent
+.RI [ OPTIONS ]
+.I COMMAND
+.RI [ ARGS ]
+.SH DESCRIPTION
+.B intent
+is a keyboard-first, local-first task manager built around a Vim-like command
+grammar. Tasks live in a single SQLite database; the CLI and the GPUI desktop
+application (\fBintent-gui\fR, see \fBintent-gui(1)\fR) share one database and
+may run concurrently.
+.PP
+Pass
+.B \-\-json
+to any command for machine-readable output: one JSON value on stdout, and on
+error a single JSON object on stderr of the form
+.B {"error":{"code":...,"message":...}}.
+Error codes are stable:
+.BR not_found ", " bad_date ", " bad_value ", " usage ", " io ", " db .
+.SS Task model
+Tasks have a stable 6-character
+.IR id ", a single-line " title ", multi-line " notes ", a lifecycle " status
+.RB ( active ", " done ", " archived "),
+an inbox flag, a priority (none|low|medium|high), an optional free-form
+project, tags, and three optional dates: \fBdue\fR (hard deadline),
+\fBremind\fR (soft resurfacing), and \fBdefer_until\fR (hidden from Today
+until then).
+.PP
+Capturing requires no metadata; captured tasks land in the inbox. A task
+leaves the inbox when it gains a project, a due date, a remind date, or an
+explicit organize. Priority, tags, notes, and title edits never clear the
+inbox.
+.SS Views
+.TP
+.B inbox
+captured, not yet organized (newest first)
+.TP
+.B today
+active tasks due or reminding today, not deferred (due date ascending, then
+priority, then oldest)
+.TP
+.B upcoming
+active, organized, not in today (soonest first, undated "someday" last)
+.TP
+.B completed
+status done (newest first)
+.TP
+.B archived
+status archived (newest first)
+.TP
+.B all
+everything except archived (default for \fBlist\fR)
+.SS Dates
+Everywhere a date is accepted:
+.BR YYYY-MM-DD ", " today ", " tod ", " tomorrow ", " tom ", " tmr ", "
+.BR yesterday ", " +N "[d|w|m|y], " \-N [d|w|m|y], a weekday name
+.RB ( mon .. sun ,
+next occurrence, today included), and
+.B none
+or
+.B \-
+where clearing is allowed.
+.SH COMMANDS
+.TP
+.BI "intent add " TITLE
+Capture a new task (alias for the title:
+.BR \-\-title ).
+Options:
+.BR \-\-notes ,
+.B \-\-due ,
+.B \-\-remind ,
+.B \-\-priority ,
+.BR \-\-project ,
+.BR \-\-tags " a,b," 
+.B \-\-no\-inbox .
+Assigning
+.BR \-\-project ,
+.B \-\-due ,
+or
+.B \-\-remind
+implies leaving the inbox.
+.TP
+.BI "intent list [" VIEW "]"
+List a view (inbox|today|upcoming|completed|archived|all; default all).
+Filters:
+.BR \-\-project ", " \-\-tag ", " \-\-priority ", " \-\-query ", " \-\-limit .
+.TP
+.BI "intent show " ID
+Show one task in full.
+.TP
+.BI "intent edit " ID
+Edit fields; at least one flag required:
+.BR \-\-title ", " \-\-notes ", " \-\-due ", " \-\-remind ", " \-\-defer\-until ,
+.BR \-\-priority ", " \-\-project ", " \-\-tags ", " \-\-tag\-add ", " \-\-tag\-rm .
+Dates and projects accept
+.B none
+/
+.B \-
+to clear.
+.TP
+.BI "intent done " ID
+Complete a task.
+.TP
+.BI "intent reopen " ID
+Reopen a completed task.
+.TP
+.BI "intent defer " "ID DATE"
+Hide from Today until DATE (or
+.B none
+to clear).
+.TP
+.BI "intent prioritize " "ID LEVEL"
+Set priority: none|low|medium|high (aliases \-/l/m/h).
+.TP
+.BI "intent archive " ID
+Move out of sight (reversible with
+.BR unarchive ).
+.TP
+.BI "intent unarchive " ID
+Bring an archived task back to active.
+.TP
+.BI "intent organize " "ID [\-\-project P]"
+Take a task out of the inbox, optionally assigning a project.
+.TP
+.BI "intent delete " ID
+Permanently delete. Asks y/N on a TTY; refuses without
+.B \-\-force
+in non-interactive mode.
+.TP
+.BI "intent search " QUERY
+ANDed case-insensitive terms over title/notes/project/tags; archived excluded.
+.TP
+.B intent counts
+Per-view task counts.
+.TP
+.BI "intent completions " SHELL
+Print a completion script for
+.BR bash ", " zsh ", or " fish
+on stdout. Does not access the database.
+.TP
+.B intent help [COMMAND]
+Show help.
+.SH EXIT STATUS
+.TP
+.B 0
+success
+.TP
+.B 1
+runtime error (database, io)
+.TP
+.B 2
+usage error (bad flags)
+.TP
+.B 3
+task not found
+.TP
+.B 4
+invalid value (date, priority, ...)
+.SH ENVIRONMENT
+.TP
+.B INTENT_DB
+Path to the SQLite database file. When unset or empty, the default path is
+used instead.
+.TP
+.B XDG_DATA_HOME
+Base for the default database path
+.IR $XDG_DATA_HOME/intent/tasks.db ;
+falls back to
+.IR ~/.local/share/intent/tasks.db 
+.SH FILES
+.I ~/.local/share/intent/tasks.db
+(default database; WAL mode)
+.SH SEE ALSO
+.BR intent-gui (1)

@@ -25,10 +25,16 @@ fn fx() -> Fixture {
 fn seed(f: &mut Fixture, names: &[&str]) -> Vec<String> {
     let mut ids = Vec::new();
     for n in names {
-        let out = ops::add(&f.state.store, NewTask { title: (*n).to_string(), ..Default::default() })
-            .unwrap()
-            .task
-            .unwrap();
+        let out = ops::add(
+            &f.state.store,
+            NewTask {
+                title: (*n).to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .task
+        .unwrap();
         ids.push(out.id);
     }
     f.state.switch_view(intent_core::TaskView::Inbox);
@@ -151,7 +157,11 @@ fn number_keys_switch_views_and_tab_cycles() {
     assert_eq!(f.state.view, TaskView::Completed);
     feed(&mut f, "tab");
     feed(&mut f, "tab");
-    assert_eq!(f.state.view, TaskView::Today, "two tabs from Completed wrap through Inbox");
+    assert_eq!(
+        f.state.view,
+        TaskView::Today,
+        "two tabs from Completed wrap through Inbox"
+    );
 }
 
 #[test]
@@ -162,7 +172,11 @@ fn digits_five_nine_are_counts_not_views() {
     assert_eq!(f.state.cursor, 0);
     feed(&mut f, "5 j");
     assert_eq!(f.state.cursor, 5, "5j moves five rows");
-    assert_eq!(f.state.view, TaskView::Inbox, "5 is a count, not a view key");
+    assert_eq!(
+        f.state.view,
+        TaskView::Inbox,
+        "5 is a count, not a view key"
+    );
     feed(&mut f, "G");
     let bottom = f.state.rows.len() - 1;
     assert_eq!(f.state.cursor, bottom);
@@ -179,14 +193,26 @@ fn x_toggles_completion_and_undo_restores() {
 
     // Complete from the inbox; the task leaves the view.
     feed(&mut f, "x");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Done);
-    assert!(f.state.store.get_task(&ids[0]).unwrap().completed_at.is_some());
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Done
+    );
+    assert!(f
+        .state
+        .store
+        .get_task(&ids[0])
+        .unwrap()
+        .completed_at
+        .is_some());
 
     // Reopen from the Completed view.
     feed(&mut f, "4");
     assert_eq!(f.state.rows.len(), 1);
     feed(&mut f, "x");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Active);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Active
+    );
 
     // The reopened task is back in the inbox.
     feed(&mut f, "1");
@@ -194,11 +220,20 @@ fn x_toggles_completion_and_undo_restores() {
 
     // Undo/redo the completion.
     feed(&mut f, "x");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Done);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Done
+    );
     feed(&mut f, "u");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Active);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Active
+    );
     feed(&mut f, "<c-r>");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Done);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Done
+    );
 }
 
 #[test]
@@ -206,14 +241,20 @@ fn d_archives_and_space_D_unarchives() {
     let mut f = fx();
     let ids = seed(&mut f, &["one"]);
     feed(&mut f, "d");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Archived);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Archived
+    );
     // archived tasks live in the archived view; unarchive from there
     feed(&mut f, ":");
     type_prompt_text(&mut f, "archived");
     feed(&mut f, "<cr>");
     assert_eq!(f.state.rows.len(), 1);
     feed(&mut f, "<space> D");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Active);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Active
+    );
 }
 
 #[test]
@@ -230,7 +271,10 @@ fn capital_D_delete_requires_confirmation_and_is_undoable() {
     feed(&mut f, "y"); // single keypress confirms
     assert!(f.state.store.get_task(&ids[0]).is_err());
     feed(&mut f, "u");
-    assert!(f.state.store.get_task(&ids[0]).is_ok(), "delete is session-undoable");
+    assert!(
+        f.state.store.get_task(&ids[0]).is_ok(),
+        "delete is session-undoable"
+    );
 }
 
 // ---- dates via leader ------------------------------------------------------------
@@ -279,12 +323,21 @@ fn shift_due_keys_and_repeat() {
     feed(&mut f, "2");
     assert_eq!(f.state.rows.len(), 1);
     feed(&mut f, ">"); // +1 day: the task leaves Today (no longer due)
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().due, Some(today.add_days(1)));
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().due,
+        Some(today.add_days(1))
+    );
     feed(&mut f, "3"); // continue in Upcoming
     feed(&mut f, ">");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().due, Some(today.add_days(2)));
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().due,
+        Some(today.add_days(2))
+    );
     feed(&mut f, "<"); // -1
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().due, Some(today.add_days(1)));
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().due,
+        Some(today.add_days(1))
+    );
 
     // . repeats the last op (the -1 shift)
     feed(&mut f, ".");
@@ -296,13 +349,25 @@ fn priority_bump_and_repeat() {
     let mut f = fx();
     let ids = seed(&mut f, &["task"]);
     feed(&mut f, "+");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().priority, intent_core::Priority::Low);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().priority,
+        intent_core::Priority::Low
+    );
     feed(&mut f, "+ +");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().priority, intent_core::Priority::High);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().priority,
+        intent_core::Priority::High
+    );
     feed(&mut f, "-");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().priority, intent_core::Priority::Medium);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().priority,
+        intent_core::Priority::Medium
+    );
     feed(&mut f, ".");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().priority, intent_core::Priority::Low);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().priority,
+        intent_core::Priority::Low
+    );
 }
 
 // ---- editor -----------------------------------------------------------------------
@@ -329,7 +394,11 @@ fn editor_open_type_write_through_and_close() {
     // has nothing to undo, and the edit persists.
     feed(&mut f, "u");
     assert_eq!(f.state.store.get_task(&ids[0]).unwrap().title, "plain!");
-    assert!(f.state.status.contains("nothing to undo"), "status: {}", f.state.status);
+    assert!(
+        f.state.status.contains("nothing to undo"),
+        "status: {}",
+        f.state.status
+    );
 }
 
 #[test]
@@ -348,7 +417,10 @@ fn editor_notes_field_and_tab() {
     let t = f.state.store.get_task(&ids[0]).unwrap();
     assert_eq!(t.notes, "line one\nline two");
     feed(&mut f, "tab");
-    assert!(f.state.editor.as_ref().unwrap().focus_title, "tab wraps back to title");
+    assert!(
+        f.state.editor.as_ref().unwrap().focus_title,
+        "tab wraps back to title"
+    );
     feed(&mut f, "<esc>");
 }
 
@@ -365,7 +437,11 @@ fn search_flow() {
     assert_eq!(f.state.rows.len(), 2);
     feed(&mut f, "<esc>");
     assert!(f.state.search_query.is_none());
-    assert_eq!(f.state.view, TaskView::Inbox, "esc returns to the previous view");
+    assert_eq!(
+        f.state.view,
+        TaskView::Inbox,
+        "esc returns to the previous view"
+    );
 }
 
 // ---- commands ---------------------------------------------------------------------
@@ -383,7 +459,10 @@ fn command_prompt_due_and_quit() {
     feed(&mut f, ":");
     type_prompt_text(&mut f, "nosuchcmd");
     feed(&mut f, "<cr>");
-    assert!(f.state.prompt.is_some(), "unknown command keeps prompt open");
+    assert!(
+        f.state.prompt.is_some(),
+        "unknown command keeps prompt open"
+    );
     feed(&mut f, "<esc>");
 
     feed(&mut f, ":");
@@ -402,7 +481,10 @@ fn command_q_closes_editor_first() {
     type_prompt_text(&mut f, "q");
     feed(&mut f, "<cr>");
     assert!(f.state.editor.is_none());
-    assert!(!f.state.quit_requested, ":q in editor only closes the editor");
+    assert!(
+        !f.state.quit_requested,
+        ":q in editor only closes the editor"
+    );
 }
 
 // ---- visual -----------------------------------------------------------------------
@@ -448,7 +530,10 @@ fn prompt_cancel_restores_focus_and_cursor() {
     let before = f.state.cursor;
     feed(&mut f, "<space> d");
     feed(&mut f, "<esc>");
-    assert_eq!(f.state.cursor, before, "cursor unchanged after cancelled prompt");
+    assert_eq!(
+        f.state.cursor, before,
+        "cursor unchanged after cancelled prompt"
+    );
 }
 
 #[test]
@@ -464,22 +549,34 @@ fn external_changes_are_detected() {
     let mut state = GuiState::new(store, clip);
     ops::add(
         &state.store,
-        NewTask { title: "gui made this".into(), ..Default::default() },
+        NewTask {
+            title: "gui made this".into(),
+            ..Default::default()
+        },
     )
     .unwrap();
     state.refresh();
-    assert!(!state.check_external_changes(), "own writes are not external");
+    assert!(
+        !state.check_external_changes(),
+        "own writes are not external"
+    );
 
     let other = Store::open(&path).unwrap();
     ops::add(
         &other,
-        NewTask { title: "cli made this".into(), ..Default::default() },
+        NewTask {
+            title: "cli made this".into(),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(state.check_external_changes());
     state.switch_view(intent_core::TaskView::Inbox);
     let titles: Vec<String> = state.rows.iter().map(|t| t.title.clone()).collect();
-    assert!(titles.contains(&"cli made this".to_string()), "reload picks up new rows");
+    assert!(
+        titles.contains(&"cli made this".to_string()),
+        "reload picks up new rows"
+    );
     let _ = std::fs::remove_file(&path);
     let _ = &f;
 }
@@ -492,7 +589,10 @@ fn mode_label_and_pending_display() {
     seed(&mut f, &["a"]);
     assert_eq!(f.state.mode_label(), "NORMAL");
     f.state.handle_key(Key::new("space"));
-    assert!(f.state.pending_display().contains("SPC"), "leader is visible");
+    assert!(
+        f.state.pending_display().contains("SPC"),
+        "leader is visible"
+    );
     f.state.handle_key(Key::new("esc"));
     assert_eq!(f.state.pending_display(), "");
 }
@@ -504,7 +604,10 @@ fn unbound_keys_cancel_gracefully() {
     feed(&mut f, "z");
     assert!(!f.state.status.is_empty(), "z reports unbound");
     feed(&mut f, "<space> z");
-    assert!(f.state.status.contains("unknown leader"), "bad leader key reported");
+    assert!(
+        f.state.status.contains("unknown leader"),
+        "bad leader key reported"
+    );
 }
 
 #[test]
@@ -523,7 +626,10 @@ fn yank_writes_clipboard() {
 #[test]
 fn ctrl_d_and_ctrl_u_jump_ten_rows() {
     let mut f = fx();
-    seed(&mut f, &["a","b","c","d","e","f","g","h","i","j","k","l"]);
+    seed(
+        &mut f,
+        &["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"],
+    );
     feed(&mut f, "<c-d>");
     assert_eq!(f.state.cursor, 10, "ctrl-d jumps 10 rows");
     feed(&mut f, "<c-d>");
@@ -543,7 +649,10 @@ fn x_on_archived_revives_to_active() {
     feed(&mut f, "<cr>");
     assert_eq!(f.state.rows.len(), 1);
     feed(&mut f, "x");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().status, intent_core::Status::Active);
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().status,
+        intent_core::Status::Active
+    );
 }
 
 #[test]
@@ -552,7 +661,10 @@ fn visual_y_writes_titles_to_clipboard() {
     seed(&mut f, &["first", "second"]);
     feed(&mut f, "V j y");
     let text = f.clip.read().unwrap_or_default();
-    assert_eq!(text, "second\nfirst", "visual y yanks newline-joined titles (inbox is newest-first)");
+    assert_eq!(
+        text, "second\nfirst",
+        "visual y yanks newline-joined titles (inbox is newest-first)"
+    );
 }
 
 #[test]
@@ -563,7 +675,7 @@ fn list_yank_seeds_editor_paste() {
     seed(&mut f, &["yanked title"]);
     feed(&mut f, "y");
     feed(&mut f, "<cr>"); // open editor on the task
-    feed(&mut f, "P");    // paste edit buffer before cursor (title, col 0)
+    feed(&mut f, "P"); // paste edit buffer before cursor (title, col 0)
     assert_eq!(
         f.state.editor.as_ref().unwrap().title.text(),
         "yanked titleyanked title"

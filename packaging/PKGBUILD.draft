@@ -1,0 +1,52 @@
+# Maintainer: shanu <shanu@local>
+#
+# DRAFT — adapt before submitting to the AUR.
+#
+# Pre-submission checklist:
+#   1. Confirm the pkgname "intent" is free on the AUR; if taken, use a
+#      qualified name (e.g. intent-tasks) and update Exec/Icon references.
+#   2. Replace sha256sums 'SKIP' with the real checksum of the v-prefixed
+#      tag tarball:  updpkgsums  (or `makepkg -g`).
+#   3. Validate:  makepkg --printsrcinfo > .SRCINFO && namcap PKGBUILD
+#      and build in a clean chroot (devtools) before uploading.
+#   4. The runtime deps below were derived from `ldd target/release/intent-gui`
+#      — re-verify after any gpui upgrade.
+#
+# NOTE: the icon/desktop cache updates are intentionally absent — pacman's
+# native hooks (gtk-update-icon-cache, update-desktop-database) run
+# automatically after install.
+
+pkgname=intent
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Keyboard-first, local-first task management with a Vim-like interface"
+arch=('x86_64')
+url="https://github.com/YOUR_ACCOUNT/intent"
+license=('MIT')
+# Runtime linkage (verify with ldd after gpui upgrades). The GPU driver is
+# machine-specific: the loader alone is not a driver.
+depends=('gcc-libs' 'libxcb' 'libxkbcommon' 'libxkbcommon-x11' 'fontconfig'
+         'vulkan-icd-loader' 'hicolor-icon-theme' 'ttf-liberation')
+optdepends=('vulkan-intel: Intel GPU Vulkan driver'
+            'vulkan-radeon: AMD GPU Vulkan driver'
+            'nvidia-utils: NVIDIA GPU Vulkan driver')
+makedepends=('rust' 'clang' 'cmake' 'pkgconf')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+options=('!lto')  # gpui/blade link times balloon and have misbehaved under LTO
+
+build() {
+  cd "$pkgname-$pkgver"
+  make build
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  make test
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  make install DESTDIR="$pkgdir" PREFIX=/usr
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -33,17 +33,27 @@ fn feed(s: &mut GuiState, keys: &str) {
 
 fn typed(s: &mut GuiState, text: &str) {
     for c in text.chars() {
-        let k = if c == ' ' { Key::new("space") } else { Key::new(&c.to_string()) };
+        let k = if c == ' ' {
+            Key::new("space")
+        } else {
+            Key::new(&c.to_string())
+        };
         s.handle_key(k);
     }
 }
 
 fn seed(s: &mut GuiState, title: &str) -> String {
-    let id = ops::add(&s.store, NewTask { title: title.into(), ..Default::default() })
-        .unwrap()
-        .task
-        .unwrap()
-        .id;
+    let id = ops::add(
+        &s.store,
+        NewTask {
+            title: title.into(),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .task
+    .unwrap()
+    .id;
     s.switch_view(TaskView::Inbox);
     id
 }
@@ -56,16 +66,10 @@ fn editor_visual_esc_exits_visual_not_editor() {
     assert!(s.editor.is_some());
     feed(&mut s, "v");
     feed(&mut s, "l");
-    assert_eq!(
-        s.editor.as_ref().unwrap().title.mode_name(),
-        "VISUAL"
-    );
+    assert_eq!(s.editor.as_ref().unwrap().title.mode_name(), "VISUAL");
     feed(&mut s, "<esc>");
     assert!(s.editor.is_some(), "editor must stay open after visual esc");
-    assert_eq!(
-        s.editor.as_ref().unwrap().title.mode_name(),
-        "NORMAL"
-    );
+    assert_eq!(s.editor.as_ref().unwrap().title.mode_name(), "NORMAL");
     feed(&mut s, "<esc>"); // normal-mode esc closes the editor
     assert!(s.editor.is_none());
 }
@@ -81,7 +85,10 @@ fn editor_write_through_bumps_updated_at() {
     feed(&mut s, "<esc>"); // leave insert; write-through already happened
     let t1 = s.store.get_task(&id).unwrap();
     assert_eq!(t1.title, "before!");
-    assert!(t1.updated_at > t0.updated_at, "write-through bumps updated_at (SPEC §1)");
+    assert!(
+        t1.updated_at > t0.updated_at,
+        "write-through bumps updated_at (SPEC §1)"
+    );
     feed(&mut s, "<esc>");
 }
 
@@ -94,7 +101,11 @@ fn editor_never_persists_empty_title() {
     feed(&mut s, "<esc>"); // (still insert→normal transitions; write-through refused)
     let t = s.store.get_task(&id).unwrap();
     assert_eq!(t.title, "keep", "empty title is refused, old title kept");
-    assert!(s.status.contains("must not be empty"), "status: {:?}", s.status);
+    assert!(
+        s.status.contains("must not be empty"),
+        "status: {:?}",
+        s.status
+    );
     feed(&mut s, "<esc>");
 }
 

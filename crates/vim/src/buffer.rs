@@ -1,6 +1,5 @@
 /// Plain text buffer over char vectors with the primitives the engine needs.
 /// Buffers here are titles and notes — small — so simplicity beats ropes.
-
 pub type Pos = (usize, usize); // (line, char-column)
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,7 +10,7 @@ pub struct Buffer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharClass {
     Whitespace,
-    Word,      // alphanumeric or '_' (or any non-space for big words)
+    Word, // alphanumeric or '_' (or any non-space for big words)
     Punct,
 }
 
@@ -48,10 +47,7 @@ impl Buffer {
     }
 
     pub fn char_at(&self, pos: Pos) -> Option<char> {
-        self.lines
-            .get(pos.0)
-            .and_then(|l| l.get(pos.1))
-            .copied()
+        self.lines.get(pos.0).and_then(|l| l.get(pos.1)).copied()
     }
 
     pub fn clamp_normal(&self, pos: Pos) -> Pos {
@@ -63,7 +59,9 @@ impl Buffer {
 
     pub fn first_non_blank(&self, line: usize) -> usize {
         let l = &self.lines[line];
-        l.iter().position(|c| !c.is_whitespace()).unwrap_or(l.len().saturating_sub(1).min(l.len()))
+        l.iter()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(l.len().saturating_sub(1).min(l.len()))
     }
 
     pub fn insert_char(&mut self, pos: Pos, c: char) {
@@ -92,7 +90,11 @@ impl Buffer {
             removed.push_str(&l.iter().collect::<String>());
             removed.push('\n');
         }
-        removed.push_str(&self.lines[l2][..c2.min(self.lines[l2].len())].iter().collect::<String>());
+        removed.push_str(
+            &self.lines[l2][..c2.min(self.lines[l2].len())]
+                .iter()
+                .collect::<String>(),
+        );
         let mut merged: Vec<char> = self.lines[l1][..c1].to_vec();
         merged.extend(tail);
         self.lines.splice(l1..=l2, std::iter::once(merged));
@@ -104,8 +106,7 @@ impl Buffer {
         let from = from.min(self.lines.len() - 1);
         let to = to.min(self.lines.len() - 1);
         let (from, to) = (from.min(to), from.max(to));
-        let removed: Vec<String> = self.lines
-            [from..=to]
+        let removed: Vec<String> = self.lines[from..=to]
             .iter()
             .map(|l| l.iter().collect())
             .collect();
@@ -151,8 +152,11 @@ impl Buffer {
     /// Insert whole lines before the given line index (0-based). `before`
     /// may be lines.len() to append at the end.
     pub fn insert_lines(&mut self, before: usize, lines_text: &str) {
-        let new_lines: Vec<Vec<char>> =
-            lines_text.trim_end_matches('\n').split('\n').map(|l| l.chars().collect()).collect();
+        let new_lines: Vec<Vec<char>> = lines_text
+            .trim_end_matches('\n')
+            .split('\n')
+            .map(|l| l.chars().collect())
+            .collect();
         let at = before.min(self.lines.len());
         self.lines.splice(at..at, new_lines);
     }
