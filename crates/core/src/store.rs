@@ -26,9 +26,11 @@ impl Store {
     }
 
     /// Default database path: `$INTENT_DB`, else `$XDG_DATA_HOME/intent/tasks.db`,
-    /// else `~/.local/share/intent/tasks.db` (SPEC §2).
+    /// else `~/.local/share/intent/tasks.db` (SPEC §2). An empty `INTENT_DB`
+    /// is treated as unset — SQLite would otherwise open a throwaway temp
+    /// database and the user's writes would silently vanish.
     pub fn default_path() -> PathBuf {
-        if let Ok(p) = std::env::var("INTENT_DB") {
+        if let Some(p) = std::env::var("INTENT_DB").ok().filter(|s| !s.is_empty()) {
             return PathBuf::from(p);
         }
         let base = std::env::var("XDG_DATA_HOME")
@@ -304,6 +306,10 @@ mod tests {
         let saved = std::env::var("INTENT_DB").ok();
         std::env::set_var("INTENT_DB", "/tmp/intent-test-override.db");
         assert_eq!(Store::default_path(), PathBuf::from("/tmp/intent-test-override.db"));
+        // Empty INTENT_DB is treated as unset (SQLite temp-db hazard, SPEC §2).
+        std::env::set_var("INTENT_DB", "");
+        let p = Store::default_path();
+        assert!(p.file_name().map(|f| f == "tasks.db").unwrap_or(false));
         match saved {
             Some(v) => std::env::set_var("INTENT_DB", v),
             None => std::env::remove_var("INTENT_DB"),

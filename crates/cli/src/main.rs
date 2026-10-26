@@ -33,9 +33,9 @@ enum Cmd {
         title_opt: Option<String>,
         #[arg(long)]
         notes: Option<String>,
-        #[arg(long, help = "Due date (deadline)")]
+        #[arg(long, allow_hyphen_values = true, help = "Due date (deadline)")]
         due: Option<String>,
-        #[arg(long, help = "Resurface date (soft reminder)")]
+        #[arg(long, allow_hyphen_values = true, help = "Resurface date (soft reminder)")]
         remind: Option<String>,
         #[arg(long, help = "none|low|medium|high (aliases -/l/m/h)")]
         priority: Option<String>,
@@ -70,11 +70,11 @@ enum Cmd {
         title: Option<String>,
         #[arg(long)]
         notes: Option<String>,
-        #[arg(long, help = "Set due (a date, or none/- to clear)")]
+        #[arg(long, allow_hyphen_values = true, help = "Set due (a date, or none/- to clear)")]
         due: Option<String>,
-        #[arg(long, help = "Set remind (a date, or none/- to clear)")]
+        #[arg(long, allow_hyphen_values = true, help = "Set remind (a date, or none/- to clear)")]
         remind: Option<String>,
-        #[arg(long, help = "Set defer-until (a date, or none/- to clear)")]
+        #[arg(long, allow_hyphen_values = true, help = "Set defer-until (a date, or none/- to clear)")]
         defer_until: Option<String>,
         #[arg(long)]
         priority: Option<String>,
@@ -92,7 +92,11 @@ enum Cmd {
     /// Reopen a completed task
     Reopen { id: String },
     /// Defer: hide from Today until DATE (or `none` to clear)
-    Defer { id: String, date: String },
+    Defer {
+        id: String,
+        #[arg(allow_hyphen_values = true, help = "A date (SPEC §1.4), or none/- to clear")]
+        date: String,
+    },
     /// Set priority: none|low|medium|high
     Prioritize { id: String, level: String },
     /// Move a task out of sight (reversible)

@@ -171,6 +171,11 @@ p = subprocess.run([BIN, "add", "xdg probe", "--json"], capture_output=True, tex
 c = p.returncode
 xdgdb = os.path.join(xdg, "intent", "tasks.db")
 check("default path is $XDG_DATA_HOME/intent/tasks.db", "§2", os.path.exists(xdgdb), xdgdb)
+# F2 regression: empty INTENT_DB must fall back to XDG, not a disposable temp db
+p = subprocess.run([BIN, "add", "empty intent db probe", "--json"], capture_output=True, text=True,
+                   env={**env_no_intent_db, "INTENT_DB": ""}, timeout=30)
+check("empty INTENT_DB falls back to the default path (no temp-db data loss)", "§2",
+      p.returncode == 0 and os.path.exists(xdgdb) and json.loads(p.stdout) is not None)
 import sqlite3
 conn = sqlite3.connect(DB)
 mode = conn.execute("PRAGMA journal_mode").fetchone()[0]

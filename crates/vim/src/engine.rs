@@ -1056,6 +1056,11 @@ impl Engine {
 
     // ---- clipboard --------------------------------------------------------------------------
 
+    /// Seed the edit buffer (hosts share list-level yanks, SPEC §4.5 rule 5).
+    pub fn set_edit_buffer(&mut self, reg: Register) {
+        self.edit_buffer = reg;
+    }
+
     /// `Space p` in the editor: paste the system clipboard at the cursor.
     pub fn paste_from_clipboard(&mut self) -> bool {
         match self.clipboard.read() {

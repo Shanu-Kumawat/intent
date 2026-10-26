@@ -343,6 +343,7 @@ command (no cursor task, empty list) is an error message, not a crash.
 :delete             same as D (y/n confirm)
 :refresh            reload from database
 :q                  close editor / quit app from list
+:w                  no-op confirmation — Intent always saves (local-first)
 :help               help overlay
 ```
 

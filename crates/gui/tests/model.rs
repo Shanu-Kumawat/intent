@@ -325,9 +325,11 @@ fn editor_open_type_write_through_and_close() {
     feed(&mut f, "<esc>"); // close editor
     assert!(f.state.editor.is_none());
 
-    // session undo reverts the whole edit
+    // SPEC §5: editor text changes are NOT on the task undo stack — u here
+    // has nothing to undo, and the edit persists.
     feed(&mut f, "u");
-    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().title, "plain");
+    assert_eq!(f.state.store.get_task(&ids[0]).unwrap().title, "plain!");
+    assert!(f.state.status.contains("nothing to undo"), "status: {}", f.state.status);
 }
 
 #[test]
@@ -551,4 +553,20 @@ fn visual_y_writes_titles_to_clipboard() {
     feed(&mut f, "V j y");
     let text = f.clip.read().unwrap_or_default();
     assert_eq!(text, "second\nfirst", "visual y yanks newline-joined titles (inbox is newest-first)");
+}
+
+#[test]
+fn list_yank_seeds_editor_paste() {
+    // SPEC §4.5 rule 5: list y/Y write the system clipboard AND the edit
+    // buffer, so p inside a later editor pastes the list yank.
+    let mut f = fx();
+    seed(&mut f, &["yanked title"]);
+    feed(&mut f, "y");
+    feed(&mut f, "<cr>"); // open editor on the task
+    feed(&mut f, "P");    // paste edit buffer before cursor (title, col 0)
+    assert_eq!(
+        f.state.editor.as_ref().unwrap().title.text(),
+        "yanked titleyanked title"
+    );
+    feed(&mut f, "<esc><esc>");
 }

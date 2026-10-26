@@ -293,6 +293,23 @@ fn usage_error_is_json_with_json_flag() {
 }
 
 #[test]
+fn past_relative_dates_accepted_without_equals_form() {
+    // SPEC §1.4: -N[d|w|m|y] everywhere a date is expected, space form too.
+    let e = Env::new("pastdates");
+    let t = e.json(&["add", "past due", "--due", "-2d", "--json"]);
+    let due = t["due"].as_str().unwrap();
+    assert_eq!(due.len(), 10, "due parses to a calendar date: {due}");
+
+    let id = t["id"].as_str().unwrap().to_string();
+    let t2 = e.json(&["defer", &id, "-3d", "--json"]);
+    assert!(t2["defer_until"].is_string());
+
+    // clearing still works with the hyphen marker
+    let t3 = e.json(&["defer", &id, "-", "--json"]);
+    assert!(t3["defer_until"].is_null());
+}
+
+#[test]
 fn version_and_help() {
     let e = Env::new("help");
     let out = e.run(&["--version"]);

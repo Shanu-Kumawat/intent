@@ -13,7 +13,7 @@ use intent_core::views::{counts, for_view, search};
 use intent_core::{Store, NewTask};
 
 use crate::keys;
-use intent_vim::{Clipboard, Engine, EngineEvent, Key};
+use intent_vim::{Clipboard, Engine, EngineEvent, Key, Register};
 
 // ---------------------------------------------------------------------------
 // public shape
@@ -64,8 +64,6 @@ pub struct EditorState {
     pub title: Engine,
     pub notes: Engine,
     pub focus_title: bool,
-    /// Snapshot for the task-level undo entry pushed when the editor closes.
-    opened_task: Task,
 }
 
 impl EditorState {
@@ -141,6 +139,8 @@ pub struct GuiState {
     undo: Vec<Vec<RowChange>>,
     redo: Vec<Vec<RowChange>>,
     last_op: Option<Repeatable>,
+    /// Last list-level yank; seeds the editor's edit buffer (SPEC §4.5.5).
+    list_edit_buffer: Register,
 }
 
 impl GuiState {
@@ -166,6 +166,7 @@ impl GuiState {
             undo: Vec::new(),
             redo: Vec::new(),
             last_op: None,
+            list_edit_buffer: Register::charwise(String::new()),
             store,
         };
         s.refresh();
@@ -639,32 +640,23 @@ impl GuiState {
             title.handle(Key::shifted("a"));
         }
         let _ = &mut notes;
+        let seed = self.list_edit_buffer.clone();
+        title.set_edit_buffer(seed.clone());
+        notes.set_edit_buffer(seed);
         self.editor = Some(EditorState {
             task_id: id.to_string(),
             title,
             notes,
             focus_title: true,
-            opened_task: task,
         });
         self.set_status("");
     }
 
     fn close_editor(&mut self) {
         let Some(ed) = self.editor.take() else { return };
-        // The edit session is one task-level undo entry: before = task as it
-        // was when the editor opened, after = persisted state now.
-        if let Ok(current) = self.store.get_task(&ed.task_id) {
-            if current.title != ed.opened_task.title || current.notes != ed.opened_task.notes {
-                let before = ed.opened_task.clone();
-                let after = current.clone();
-                self.push_undo_from(vec![RowChange {
-                    id: ed.task_id.clone(),
-                    before: Some(before),
-                    after: Some(after),
-                }]);
-                self.set_status("edited (u in the list reverts the session)");
-            }
-        }
+        // SPEC §5: editor text changes are NOT pushed to the task undo
+        // stack — their recoverability lives in the editor's own text undo
+        // while it is open. Closing the editor ends that history.
         self.follow_id = Some(ed.task_id.clone());
         self.refresh();
     }
@@ -1230,7 +1222,7 @@ impl GuiState {
 
     /// y = title; Y = title + notes (SPEC §4.1).
     fn yank_task(&mut self, with_notes: bool) {
-        let Some(task) = self.cursor_task() else {
+        let Some(task) = self.cursor_task().cloned() else {
             self.set_status("no task under cursor");
             return;
         };
@@ -1239,6 +1231,7 @@ impl GuiState {
         } else {
             task.title.clone()
         };
+        self.list_edit_buffer = Register::charwise(text.clone());
         self.clipboard.write(&text);
         self.set_status(format!("yanked {}", task.id));
     }
@@ -1246,6 +1239,7 @@ impl GuiState {
     fn yank_rows(&mut self, a: usize, b: usize) {
         let titles: Vec<String> = self.rows[a..=b].iter().map(|t| t.title.clone()).collect();
         let text = titles.join("\n");
+        self.list_edit_buffer = Register::charwise(text.clone());
         self.clipboard.write(&text);
         self.set_status(format!("yanked {} titles", titles.len()));
     }
