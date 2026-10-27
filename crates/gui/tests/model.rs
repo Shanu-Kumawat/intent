@@ -599,8 +599,19 @@ fn external_changes_are_detected() {
     seed(&mut f, &["a"]);
     // Simulate a CLI write through a second connection: mutate via a
     // separate store handle on the same database path.
-    let path = std::env::temp_dir().join(format!("intent-gui-test-{}.db", std::process::id()));
-    let _ = std::fs::remove_file(&path);
+    // Per-test directory: SQLite's -wal/-shm sidecars must be cleaned up
+    // too, and only after every handle is dropped (a stale WAL recovered
+    // into a recycled test db is a credible flake vector).
+    let dir = std::env::temp_dir().join(format!(
+        "intent-gui-ext-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("tasks.db");
     let store = Store::open(&path).unwrap();
     let clip = Rc::new(MemClipboard::new());
     let mut state = GuiState::new(store, clip);
@@ -634,7 +645,9 @@ fn external_changes_are_detected() {
         titles.contains(&"cli made this".to_string()),
         "reload picks up new rows"
     );
-    let _ = std::fs::remove_file(&path);
+    drop(other);
+    drop(state);
+    let _ = std::fs::remove_dir_all(&dir);
     let _ = &f;
 }
 
@@ -908,15 +921,17 @@ fn search_clear_restores_pre_search_cursor() {
 
 #[test]
 fn external_reload_keeps_cursor_task() {
-    let path = std::env::temp_dir().join(format!(
-        "intent-audit-{}-{}.db",
+    // Per-test directory so -wal/-shm sidecars are cleaned up with it.
+    let dir = std::env::temp_dir().join(format!(
+        "intent-gui-reload-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
     ));
-    let _ = std::fs::remove_file(&path);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("tasks.db");
     let store = Store::open(&path).unwrap();
     let clip = Rc::new(MemClipboard::new());
     let mut state = GuiState::new(store, clip);
@@ -962,7 +977,9 @@ fn external_reload_keeps_cursor_task() {
         a.id,
         "cursor follows the task id across the reload"
     );
-    let _ = std::fs::remove_file(&path);
+    drop(state);
+    drop(other);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
