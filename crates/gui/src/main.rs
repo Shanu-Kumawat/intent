@@ -404,76 +404,22 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
 
 /// One editor line rendered as styled segments (inverse for selection/caret).
 fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoElement {
-    let chars: Vec<char> = engine.buf.lines[line_ix].clone();
-    let cursor = engine.cursor();
-    let sel = engine.selection();
-
-    // Character ranges [start,end) of inverse text on this line.
-    let (s_start, s_end, linewise) = match sel {
-        Some((a, b, lw)) if a.0 <= line_ix && b.0 >= line_ix => {
-            let s = if lw {
-                0
-            } else if a.0 == line_ix {
-                a.1
-            } else {
-                0
-            };
-            let e = if lw {
-                chars.len()
-            } else if b.0 == line_ix {
-                b.1.min(chars.len())
-            } else {
-                chars.len()
-            };
-            (s, e, true)
-        }
-        _ => (usize::MAX, 0, false),
-    };
-    let _ = linewise;
-
-    let caret_at = if focused && cursor.0 == line_ix {
-        Some(cursor.1)
-    } else {
-        None
-    };
-
-    let mut segments: Vec<(String, bool)> = Vec::new();
-    let mut ix = 0usize;
-    while ix < chars.len() {
-        let in_sel = s_start <= ix && ix < s_end;
-        let is_caret = caret_at == Some(ix);
-        // The caret is always a visible block — including insert mode's
-        // mid-line caret (SPEC §4.2 feedback).
-        let inverse = in_sel || is_caret;
-        let len = if inverse {
-            1
-        } else {
-            (s_start
-                .max(ix + 1)
-                .min(if s_end > ix { s_end } else { chars.len() })
-                - ix)
-                .max(1)
-        };
-        let len = len.min(chars.len() - ix);
-        segments.push((chars[ix..ix + len].iter().collect(), inverse));
-        ix += len;
-    }
-    if caret_at == Some(chars.len()) {
-        // caret at end of line: block on a virtual space (insert mode or EOL)
-        segments.push((" ".into(), focused));
-    } else if segments.is_empty() && caret_at.is_some() {
-        segments.push((" ".into(), focused));
-    } else if segments.is_empty() {
-        segments.push((" ".into(), false));
-    }
-
     let mut line = div().flex().h(px(24.0)).items_center();
-    for (text, inverse) in segments {
-        let seg = div().child(text);
-        if inverse {
-            line = line.child(seg.bg(FG).text_color(CHROME));
-        } else {
-            line = line.child(seg);
+    for seg in intent_gui::render::line_segments(engine, line_ix, focused) {
+        match seg {
+            intent_gui::render::EditSeg::Text(text, inverse) => {
+                let seg = div().child(text);
+                if inverse {
+                    line = line.child(seg.bg(FG).text_color(CHROME));
+                } else {
+                    line = line.child(seg);
+                }
+            }
+            // Insert mode: a thin vertical bar instead of a block, standing
+            // in for the character position (SPEC §4.2).
+            intent_gui::render::EditSeg::CaretBar => {
+                line = line.child(div().w(px(2.0)).h(px(18.0)).bg(FG).flex_none());
+            }
         }
     }
     line

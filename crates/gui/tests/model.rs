@@ -3,7 +3,7 @@
 
 use intent_core::model::{NewTask, TaskView};
 use intent_core::{ops, Store};
-use intent_gui::model::GuiState;
+use intent_gui::model::{GuiState, PromptKind};
 use intent_vim::{Clipboard, Key, MemClipboard};
 use std::rc::Rc;
 
@@ -1022,5 +1022,83 @@ fn empty_date_input_is_an_error_not_a_clear() {
         f.state.store.get_task(&ids[0]).unwrap().due,
         None,
         "none clears"
+    );
+}
+
+// ---- capture focus + SPC SPC (help keymap regressions) ---------------------
+
+#[test]
+fn space_space_opens_capture() {
+    let mut f = fx();
+    seed(&mut f, &["a"]);
+    feed(&mut f, "<space> <space>");
+    assert!(
+        matches!(
+            f.state.prompt.as_ref().map(|p| p.kind),
+            Some(PromptKind::Capture)
+        ),
+        "SPC SPC opens the capture prompt, status: {:?}",
+        f.state.status
+    );
+    feed(&mut f, "<esc>");
+    assert!(f.state.prompt.is_none());
+    // Other leader sequences still work afterwards.
+    feed(&mut f, "<space> c");
+    assert!(matches!(
+        f.state.prompt.as_ref().map(|p| p.kind),
+        Some(PromptKind::Capture)
+    ));
+}
+
+#[test]
+fn capture_moves_cursor_to_new_task_when_visible() {
+    // SPEC §4.1: the new task is visible in the current view (inbox is
+    // newest-first) → the cursor moves onto it.
+    let mut f = fx();
+    seed(&mut f, &["a", "b", "c", "d", "e"]);
+    feed(&mut f, "j j j");
+    let before = f.state.cursor_task().unwrap().title.clone();
+    feed(&mut f, "o");
+    type_prompt_text(&mut f, "fresh capture");
+    feed(&mut f, "<cr>");
+    let cur = f.state.cursor_task().unwrap();
+    assert_eq!(cur.title, "fresh capture");
+    assert_ne!(cur.title, before, "cursor left the old task");
+}
+
+#[test]
+fn capture_in_today_keeps_cursor_on_existing_task() {
+    // SPEC §4.1: the new task is NOT visible in the current view (undated
+    // captures are inbox-only) → the cursor stays where it was.
+    let mut f = fx();
+    let ids = seed(&mut f, &["a", "b", "c"]);
+    let today = f.state.today;
+    for id in &ids {
+        ops::edit(
+            &f.state.store,
+            id,
+            &intent_core::TaskPatch {
+                due: intent_core::Patch::Set(today),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    f.state.switch_view(TaskView::Today);
+    feed(&mut f, "j");
+    let before = f.state.cursor_task().unwrap().id.clone();
+    feed(&mut f, "o");
+    type_prompt_text(&mut f, "undated capture");
+    feed(&mut f, "<cr>");
+    assert!(f.state.prompt.is_none());
+    assert_eq!(
+        f.state.cursor_task().unwrap().id,
+        before,
+        "cursor stays on the existing task"
+    );
+    assert_eq!(
+        f.state.rows.len(),
+        3,
+        "the undated capture does not enter Today"
     );
 }

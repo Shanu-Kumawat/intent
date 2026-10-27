@@ -1088,8 +1088,15 @@ impl GuiState {
     }
 
     fn run_leader(&mut self, seq: Vec<Key>) {
-        // seq[0] is the space; seq[1] is the leader command key.
-        let Some(cmd) = seq.get(1).and_then(|k| k.chr()) else {
+        // seq[0] is the space; seq[1] is the leader command key. A second
+        // space is the quick-capture binding — `chr()` is None for the
+        // multi-char "space" key name, so match it explicitly.
+        let cmd = match seq.get(1) {
+            None => None,
+            Some(k) if k.key == "space" => Some(' '),
+            Some(k) => k.chr(),
+        };
+        let Some(cmd) = cmd else {
             self.set_status("leader: c d u r o D p space");
             return;
         };

@@ -293,7 +293,9 @@ Opened by `enter`/`i`/`a` from the list. Two stacked fields, **TITLE**
 (single line) and **NOTES** (multi-line), each an independent text buffer.
 The focused field is highlighted; `tab`/`shift-tab` and boundary `j`/`k`
 move between fields (cursor column carried over, clamped). Line-oriented
-operations never cross the field boundary.
+operations never cross the field boundary. The caret is always visible: a
+block (inverse character) in NORMAL/VISUAL, a thin vertical bar in INSERT —
+mid-line, at end-of-line, and on empty lines alike.
 
 Closing: `escape` in NORMAL (i.e. a second `escape` after leaving insert),
 `:q`, or switching views. Focus returns to the list on the same task id.
