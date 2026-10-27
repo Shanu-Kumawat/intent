@@ -21,7 +21,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Keyboard-first, local-first task management with a Vim-like interface"
 arch=('x86_64')
-url="https://github.com/YOUR_ACCOUNT/intent"
+url="https://github.com/Shanu-Kumawat/intent"
 license=('MIT')
 # Runtime linkage (verify with ldd after gpui upgrades). The GPU driver is
 # machine-specific: the loader alone is not a driver.
