@@ -13,7 +13,7 @@ use gpui::{
 use intent_core::{Store, TaskView};
 use intent_gui::keys;
 use intent_gui::model::{priority_mark, GuiState, PromptKind};
-use intent_vim::{Clipboard, Engine, Mode};
+use intent_vim::{Clipboard, Engine};
 
 // Dark monochrome theme. Two anchor tones (INK body / PAPER foreground)
 // with an inverted selection — the same neo-brutalist structure as the light
@@ -22,10 +22,10 @@ use intent_vim::{Clipboard, Engine, Mode};
 const BG: gpui::Rgba = rgba_lit(0.055, 0.055, 0.055, 1.0); // #0e0e0e
 /// Chrome (header/status) — pure black, one step below the body.
 const CHROME: gpui::Rgba = rgba_lit(0.0, 0.0, 0.0, 1.0);
-/// Primary foreground — pure white, 17.9:1 on BG, 21:1 on CHROME.
+/// Primary foreground — pure white, 19.3:1 on BG, 21:1 on CHROME.
 const FG: gpui::Rgba = rgba_lit(1.0, 1.0, 1.0, 1.0);
-/// Secondary text on BG — #9a9a9a is 7.4:1 against #0e0e0e (WCAG AAA).
-const MUTED: gpui::Rgba = rgba_lit(0.604, 0.604, 0.604, 1.0);
+/// Secondary text on BG — #a0a0a0 is 7.4:1 against #0e0e0e (WCAG AAA).
+const MUTED: gpui::Rgba = rgba_lit(0.627, 0.627, 0.627, 1.0);
 /// Structure lines — #303030 on #0e0e0e stays visible without shouting.
 const HAIRLINE: gpui::Rgba = rgba_lit(0.188, 0.188, 0.188, 1.0);
 /// Elevated surfaces (prompt bar, editor pane) — #1a1a1a.
@@ -257,6 +257,7 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         .flex()
         .items_center()
         .gap_3()
+        .w_full()
         .h(px(34.0))
         .px_4()
         .border_b_1()
@@ -291,7 +292,7 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         div()
             .text_size(px(12.0))
             .text_color(if inverse {
-                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 4.9:1
+                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 8.9:1
             } else {
                 MUTED
             })
@@ -301,7 +302,7 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         div()
             .text_size(px(12.0))
             .text_color(if inverse {
-                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 4.9:1
+                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 8.9:1
             } else {
                 MUTED
             })
@@ -404,7 +405,6 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
 fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoElement {
     let chars: Vec<char> = engine.buf.lines[line_ix].clone();
     let cursor = engine.cursor();
-    let insert_mode = engine.mode == Mode::Insert;
     let sel = engine.selection();
 
     // Character ranges [start,end) of inverse text on this line.
@@ -443,7 +443,6 @@ fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoEleme
         let is_caret = caret_at == Some(ix);
         // The caret is always a visible block — including insert mode's
         // mid-line caret (SPEC §4.2 feedback).
-        let _ = insert_mode;
         let inverse = in_sel || is_caret;
         let len = if inverse {
             1
@@ -677,24 +676,19 @@ fn main() {
                     list_scroll: UniformListScrollHandle::new(),
                     activation_sub: None,
                 });
-                // SPEC §2: reload on window activation (refocusing after
-                // alt-tab lands focus back on the root handle).
-                let shell = entity.downgrade();
-                let activation_focus = entity.read(cx).focus.clone();
-                let activation_sub =
-                    window.on_focus_in(&activation_focus, cx, move |_window, cx| {
-                        let _ = shell.update(cx, |shell, cx| {
-                            if shell.state.check_external_changes() {
+                // Key dispatch requires a focused handle; without this the
+                // window is keyboard-dead until clicked. Also subscribes the
+                // SPEC §2 activation reload — observe_window_activation is a
+                // Context method, and on_focus_in would never re-fire (the
+                // root handle stays focused across alt-tab).
+                entity.update(cx, |shell, cx| {
+                    shell.focus.focus(window);
+                    shell.activation_sub =
+                        Some(cx.observe_window_activation(window, |shell, window, cx| {
+                            if window.is_window_active() && shell.state.check_external_changes() {
                                 cx.notify();
                             }
-                        });
-                    });
-
-                // Key dispatch requires a focused handle; without this the
-                // window is keyboard-dead until clicked.
-                entity.update(cx, |shell, _| {
-                    shell.focus.focus(window);
-                    shell.activation_sub = Some(activation_sub);
+                        }));
                 });
 
                 // Poll for external (CLI/agent) database changes every 2s.
