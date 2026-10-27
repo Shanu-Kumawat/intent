@@ -123,8 +123,9 @@ list — predictability over cleverness.
   small and explicit, so interleaving risk is low and behavior is explainable.
 - The GUI detects external changes (CLI or another GUI) by polling
   `PRAGMA data_version` every 2 seconds, on window activation, and after every
-  mutating action (pure navigation keys rely on the poll); on change it
-  reloads views. Cursor position is tracked **by task
+  mutating list action (editor typing writes through without a reload
+  check; pure navigation keys rely on the poll); on change it reloads
+  views. Cursor position is tracked **by task
   id**: after reload the cursor stays on the same task if it still exists,
   otherwise the nearest row. Unfocused view state (cursor per view) survives
   reloads.

@@ -24,8 +24,9 @@ const BG: gpui::Rgba = rgba_lit(0.055, 0.055, 0.055, 1.0); // #0e0e0e
 const CHROME: gpui::Rgba = rgba_lit(0.0, 0.0, 0.0, 1.0);
 /// Primary foreground — pure white, 19.3:1 on BG, 21:1 on CHROME.
 const FG: gpui::Rgba = rgba_lit(1.0, 1.0, 1.0, 1.0);
-/// Secondary text on BG — #a0a0a0 is 7.4:1 against #0e0e0e (WCAG AAA).
-const MUTED: gpui::Rgba = rgba_lit(0.627, 0.627, 0.627, 1.0);
+/// Secondary text — #b0b0b0 clears WCAG AAA (≥7:1) on every surface it
+/// appears on: 8.9:1 on BG, 8.0:1 on SURFACE, 7.3:1 on FIELD.
+const MUTED: gpui::Rgba = rgba_lit(0.69, 0.69, 0.69, 1.0);
 /// Structure lines — #303030 on #0e0e0e stays visible without shouting.
 const HAIRLINE: gpui::Rgba = rgba_lit(0.188, 0.188, 0.188, 1.0);
 /// Elevated surfaces (prompt bar, editor pane) — #1a1a1a.

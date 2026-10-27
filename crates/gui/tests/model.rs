@@ -524,6 +524,36 @@ fn status_of(f: &Fixture, id: &str) -> intent_core::Status {
     f.state.store.get_task(id).unwrap().status
 }
 
+/// Deletes the temp dir when dropped — including on test failure, so a
+/// panic mid-test cannot orphan SQLite's -wal/-shm sidecars.
+struct TempDirGuard(std::path::PathBuf);
+
+impl TempDirGuard {
+    fn new(name: &str) -> TempDirGuard {
+        let dir = std::env::temp_dir().join(format!(
+            "{}-{}-{}",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        TempDirGuard(dir)
+    }
+
+    fn path(&self) -> std::path::PathBuf {
+        self.0.join("tasks.db")
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn visual_complete_upward_selection_exact_rows() {
     let mut f = fx();
@@ -599,19 +629,8 @@ fn external_changes_are_detected() {
     seed(&mut f, &["a"]);
     // Simulate a CLI write through a second connection: mutate via a
     // separate store handle on the same database path.
-    // Per-test directory: SQLite's -wal/-shm sidecars must be cleaned up
-    // too, and only after every handle is dropped (a stale WAL recovered
-    // into a recycled test db is a credible flake vector).
-    let dir = std::env::temp_dir().join(format!(
-        "intent-gui-ext-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("tasks.db");
+    let dir = TempDirGuard::new("intent-gui-ext");
+    let path = dir.path();
     let store = Store::open(&path).unwrap();
     let clip = Rc::new(MemClipboard::new());
     let mut state = GuiState::new(store, clip);
@@ -647,7 +666,7 @@ fn external_changes_are_detected() {
     );
     drop(other);
     drop(state);
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(dir); // explicit; Drop also cleans up on panic
     let _ = &f;
 }
 
@@ -921,17 +940,8 @@ fn search_clear_restores_pre_search_cursor() {
 
 #[test]
 fn external_reload_keeps_cursor_task() {
-    // Per-test directory so -wal/-shm sidecars are cleaned up with it.
-    let dir = std::env::temp_dir().join(format!(
-        "intent-gui-reload-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("tasks.db");
+    let dir = TempDirGuard::new("intent-gui-reload");
+    let path = dir.path();
     let store = Store::open(&path).unwrap();
     let clip = Rc::new(MemClipboard::new());
     let mut state = GuiState::new(store, clip);
@@ -977,9 +987,9 @@ fn external_reload_keeps_cursor_task() {
         a.id,
         "cursor follows the task id across the reload"
     );
-    drop(state);
     drop(other);
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(state);
+    drop(dir);
 }
 
 #[test]
