@@ -64,11 +64,34 @@ impl Store {
 
     fn init(conn: Connection) -> Result<Store> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // `journal_mode=WAL` needs a brief lock that busy_timeout does not
+        // always cover when many processes open a fresh database at once —
+        // retry the setup phase rather than failing the invocation.
+        let mut last_err = None;
+        for attempt in 0..10 {
+            match Self::init_setup(&conn) {
+                Ok(()) => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_millis(10 * (attempt + 1)));
+                }
+            }
+        }
+        if let Some(e) = last_err {
+            return Err(e);
+        }
         let store = Store { conn };
         store.migrate()?;
         Ok(store)
+    }
+
+    fn init_setup(conn: &Connection) -> Result<()> {
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        Ok(())
     }
 
     fn migrate(&self) -> Result<()> {
@@ -443,5 +466,60 @@ mod tests {
         };
         assert_eq!(err.code(), "bad_value");
         let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[cfg(test)]
+mod race_tests {
+    use crate::store::Store;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// 24 processes-equivalent threads opening a FRESH database and adding
+    /// simultaneously — the exact first-open race (SPEC §2). Every open and
+    /// every write must succeed.
+    #[test]
+    fn first_open_concurrent_writes_all_succeed() {
+        let dir = std::env::temp_dir().join(format!(
+            "intent-race-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("race.db");
+        let failures = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for i in 0..24 {
+            let db = db.clone();
+            let failures = failures.clone();
+            handles.push(std::thread::spawn(move || match Store::open(&db) {
+                Ok(store) => {
+                    let spec = crate::model::NewTask {
+                        title: format!("racer {i}"),
+                        ..Default::default()
+                    };
+                    if crate::ops::add(&store, spec).is_err() {
+                        failures.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                Err(_) => {
+                    failures.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(failures.load(Ordering::SeqCst), 0, "no open/add may fail");
+        let store = Store::open(&db).unwrap();
+        assert_eq!(
+            store.all_tasks().unwrap().len(),
+            24,
+            "all 24 writes durable"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

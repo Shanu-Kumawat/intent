@@ -535,26 +535,49 @@ mod tests {
 
     #[test]
     fn add_retries_id_collision() {
-        // Force one collision, then success.
+        // A task with id X already exists; inserting another task with the
+        // SAME id must collide once, retry with a fresh id, and succeed.
         let s = store();
-        let t = mk(&s, "x");
-        // Insert a task with a KNOWN id to make the collision deterministic
-        // is not possible with random ids; instead verify the conflict path
-        // directly by pre-inserting and calling the internal helper.
-        let mut spec_task = t.clone();
-        spec_task.id = t.id.clone(); // guaranteed constraint violation
-        let result = insert_new_task_with_forced_ids(&s, &[t.id.clone(), t.id.clone()]);
-        assert!(result.is_ok(), "retry with a fresh id succeeds");
-        let _ = spec_task;
+        let t = mk(&s, "existing");
+        let mut dupe = t.clone();
+        dupe.title = "the retry survivor".into();
+        let result = insert_new_task(s.conn(), &dupe).unwrap();
+        assert_ne!(result.id, t.id, "retry allocated a fresh id");
+        assert_eq!(result.title, "the retry survivor");
+        assert!(s.get_task(&result.id).is_ok());
+        assert_eq!(s.get_task(&t.id).unwrap().title, "existing");
     }
 
-    fn insert_new_task_with_forced_ids(s: &Store, _ids: &[String]) -> Result<Task> {
-        // Simplified: the public retry path is exercised by insertion of a
-        // duplicate via the raw helper.
-        let mut task = mk(s, "probe");
-        // Force the first attempt to collide, then let the retry generate.
-        insert_new_task(s.conn(), &task)?;
-        task.id = crate::id::new_id();
-        Ok(task)
+    #[test]
+    fn corrupt_rows_are_db_errors_not_defaults() {
+        // SPEC §2: undecodable stored values abort; a corrupt done/archived
+        // task must not silently resurface as a fresh active one.
+        for (col, value) in [
+            ("status", "'banana'"),
+            ("priority", "'urgent'"),
+            ("tags", "'not json'"),
+            ("due", "'2026-13-99'"),
+            ("created_at", "'not a timestamp'"),
+            ("completed_at", "'nope'"),
+        ] {
+            let s = Store::open_memory().unwrap();
+            s.conn()
+                .execute(
+                    "INSERT INTO tasks(id, title, status, inbox, priority, tags, created_at,
+                                       updated_at, completed_at)
+                     VALUES('badid1', 'x', 'active', 1, 'none', '[]',
+                            '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)",
+                    [],
+                )
+                .unwrap();
+            s.conn()
+                .execute(
+                    &format!("UPDATE tasks SET {col} = {value} WHERE id='badid1'"),
+                    [],
+                )
+                .unwrap();
+            let err = s.get_task("badid1").unwrap_err();
+            assert_eq!(err.code(), "db", "column {col} = {value}");
+        }
     }
 }

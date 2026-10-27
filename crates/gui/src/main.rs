@@ -15,10 +15,25 @@ use intent_gui::keys;
 use intent_gui::model::{priority_mark, GuiState, PromptKind};
 use intent_vim::{Clipboard, Engine, Mode};
 
-const BLACK: gpui::Rgba = rgba_lit(0.0, 0.0, 0.0, 1.0);
-const WHITE: gpui::Rgba = rgba_lit(1.0, 1.0, 1.0, 1.0);
-const PAPER: gpui::Rgba = rgba_lit(0.957, 0.957, 0.941, 1.0);
-const GREY: gpui::Rgba = rgba_lit(0.6, 0.6, 0.6, 1.0);
+// Dark monochrome theme. Two anchor tones (INK body / PAPER foreground)
+// with an inverted selection — the same neo-brutalist structure as the light
+// theme, roles kept explicit so text/bg contrast is never accidental.
+/// Body background — near-black, clearly not pure #000 so chrome reads apart.
+const BG: gpui::Rgba = rgba_lit(0.055, 0.055, 0.055, 1.0); // #0e0e0e
+/// Chrome (header/status) — pure black, one step below the body.
+const CHROME: gpui::Rgba = rgba_lit(0.0, 0.0, 0.0, 1.0);
+/// Primary foreground — pure white, 17.9:1 on BG, 21:1 on CHROME.
+const FG: gpui::Rgba = rgba_lit(1.0, 1.0, 1.0, 1.0);
+/// Secondary text on BG — #9a9a9a is 7.4:1 against #0e0e0e (WCAG AAA).
+const MUTED: gpui::Rgba = rgba_lit(0.604, 0.604, 0.604, 1.0);
+/// Structure lines — #303030 on #0e0e0e stays visible without shouting.
+const HAIRLINE: gpui::Rgba = rgba_lit(0.188, 0.188, 0.188, 1.0);
+/// Elevated surfaces (prompt bar, editor pane) — #1a1a1a.
+const SURFACE: gpui::Rgba = rgba_lit(0.102, 0.102, 0.102, 1.0);
+/// Focused editor field — #222222, one step above SURFACE.
+const FIELD: gpui::Rgba = rgba_lit(0.133, 0.133, 0.133, 1.0);
+const PAPER: gpui::Rgba = SURFACE;
+const GREY: gpui::Rgba = MUTED;
 const fn rgba_lit(r: f32, g: f32, b: f32, a: f32) -> gpui::Rgba {
     gpui::Rgba { r, g, b, a }
 }
@@ -69,6 +84,9 @@ struct Shell {
     clip: Rc<SyncClipboard>,
     focus: FocusHandle,
     list_scroll: UniformListScrollHandle,
+    /// Keeps the window-activation reload subscription alive (SPEC §2).
+    #[allow(dead_code)]
+    activation_sub: Option<gpui::Subscription>,
 }
 
 impl Shell {
@@ -117,16 +135,16 @@ fn header(state: &GuiState) -> impl IntoElement {
         .px_4()
         .h(px(44.0))
         .border_b_2()
-        .border_color(BLACK)
-        .bg(BLACK)
-        .text_color(WHITE)
+        .border_color(FG)
+        .bg(CHROME)
+        .text_color(FG)
         .child(
             div()
                 .flex()
                 .items_baseline()
                 .gap_2()
                 .child(div().font_weight(gpui::FontWeight::BOLD).child("INTENT"))
-                .child(div().text_color(gpui::rgba(0x888888ff)).child("///"))
+                .child(div().text_color(MUTED).child("///"))
                 .child(
                     div()
                         .font_weight(gpui::FontWeight::BOLD)
@@ -136,11 +154,7 @@ fn header(state: &GuiState) -> impl IntoElement {
                             state.view.to_string().to_uppercase()
                         })),
                 )
-                .child(
-                    div()
-                        .text_color(gpui::rgba(0x888888ff))
-                        .child(SharedString::from(search)),
-                ),
+                .child(div().text_color(MUTED).child(SharedString::from(search))),
         )
         .child(div().child(SharedString::from(state.today.to_string())))
 }
@@ -157,7 +171,7 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
         .flex_col()
         .w(px(196.0))
         .border_r_2()
-        .border_color(BLACK);
+        .border_color(FG);
     for (n, view) in items {
         let active = state.view == view;
         let count = state.view_counts.get(&view).copied().unwrap_or(0);
@@ -170,8 +184,8 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
             .py_2();
         if active {
             row = row
-                .bg(BLACK)
-                .text_color(WHITE)
+                .bg(FG)
+                .text_color(CHROME)
                 .font_weight(gpui::FontWeight::BOLD);
         }
         col = col.child(row.child(label).child(format!("{count}")));
@@ -182,8 +196,8 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
             .px_4()
             .py_2()
             .border_t_2()
-            .border_color(BLACK)
-            .text_color(GREY)
+            .border_color(HAIRLINE)
+            .text_color(MUTED)
             .child("? keymap  :q quit"),
     );
     col
@@ -246,9 +260,9 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         .h(px(34.0))
         .px_4()
         .border_b_1()
-        .border_color(gpui::rgba(0xccccccff));
+        .border_color(HAIRLINE);
     if inverse {
-        row = row.bg(BLACK).text_color(WHITE);
+        row = row.bg(FG).text_color(CHROME);
     }
     row.child(
         div()
@@ -277,9 +291,9 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         div()
             .text_size(px(12.0))
             .text_color(if inverse {
-                gpui::rgba(0xbbbbbbff)
+                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 4.9:1
             } else {
-                GREY
+                MUTED
             })
             .child(meta),
     )
@@ -287,9 +301,9 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         div()
             .text_size(px(12.0))
             .text_color(if inverse {
-                gpui::rgba(0xbbbbbbff)
+                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 4.9:1
             } else {
-                GREY
+                MUTED
             })
             .child(task.id.clone()),
     )
@@ -319,12 +333,12 @@ fn status_bar(state: &GuiState) -> impl IntoElement {
         .h(px(36.0))
         .px_3()
         .border_t_2()
-        .border_color(BLACK)
-        .bg(WHITE)
+        .border_color(FG)
+        .bg(CHROME)
         .child(
             div()
-                .bg(BLACK)
-                .text_color(WHITE)
+                .bg(FG)
+                .text_color(CHROME)
                 .px_2()
                 .py_1()
                 .font_weight(gpui::FontWeight::BOLD)
@@ -364,8 +378,8 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
         .flex()
         .flex_col()
         .border_t_2()
-        .border_color(BLACK)
-        .bg(PAPER)
+        .border_color(FG)
+        .bg(SURFACE)
         .px_3()
         .py_2()
         .child(
@@ -381,7 +395,7 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
                 .child(div().child(format!("{input}{caret}"))),
         )
         .when(!err.is_empty(), |d| {
-            d.child(div().bg(BLACK).text_color(WHITE).px_2().mt_1().child(err))
+            d.child(div().bg(FG).text_color(CHROME).px_2().mt_1().child(err))
         })
         .into_any_element()
 }
@@ -395,7 +409,7 @@ fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoEleme
 
     // Character ranges [start,end) of inverse text on this line.
     let (s_start, s_end, linewise) = match sel {
-        Some((a, b, lw)) if a.0 <= line_ix && b.0 >= line_ix && (lw || b.0 > line_ix || true) => {
+        Some((a, b, lw)) if a.0 <= line_ix && b.0 >= line_ix => {
             let s = if lw {
                 0
             } else if a.0 == line_ix {
@@ -427,7 +441,10 @@ fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoEleme
     while ix < chars.len() {
         let in_sel = s_start <= ix && ix < s_end;
         let is_caret = caret_at == Some(ix);
-        let inverse = in_sel || (is_caret && !insert_mode);
+        // The caret is always a visible block — including insert mode's
+        // mid-line caret (SPEC §4.2 feedback).
+        let _ = insert_mode;
+        let inverse = in_sel || is_caret;
         let len = if inverse {
             1
         } else {
@@ -454,7 +471,7 @@ fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoEleme
     for (text, inverse) in segments {
         let seg = div().child(text);
         if inverse {
-            line = line.child(seg.bg(BLACK).text_color(WHITE));
+            line = line.child(seg.bg(FG).text_color(CHROME));
         } else {
             line = line.child(seg);
         }
@@ -474,13 +491,9 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
             .p_2()
             .m_2()
             .border_2()
-            .border_color(if focused {
-                BLACK
-            } else {
-                gpui::rgba(0x999999ff)
-            });
+            .border_color(if focused { FG } else { HAIRLINE });
         if focused {
-            col = col.bg(WHITE);
+            col = col.bg(FIELD);
         }
         let mut inner = div().flex().flex_col();
         for li in 0..line_count {
@@ -490,7 +503,7 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
             div()
                 .font_weight(gpui::FontWeight::BOLD)
                 .text_size(px(12.0))
-                .text_color(if focused { BLACK } else { GREY })
+                .text_color(if focused { FG } else { MUTED })
                 .child(format!("{label}  {}", engine.mode_name())),
         )
         .child(inner)
@@ -533,15 +546,15 @@ fn help_overlay() -> gpui::AnyElement {
         .absolute()
         .size_full()
         .top_0()
-        .bg(gpui::rgba(0xffffffee))
+        .bg(rgba_lit(0.0, 0.0, 0.0, 0.88))
         .flex()
         .items_center()
         .justify_center()
         .child(
             div()
-                .bg(WHITE)
+                .bg(SURFACE)
                 .border_2()
-                .border_color(BLACK)
+                .border_color(FG)
                 .p_6()
                 .flex()
                 .flex_col()
@@ -577,6 +590,8 @@ impl Render for Shell {
                     .collect::<Vec<_>>()
             }),
         )
+        .flex_1()
+        .min_h_0()
         .track_scroll(list_scroll.clone());
 
         let empty = div()
@@ -612,8 +627,8 @@ impl Render for Shell {
             .size_full()
             .flex()
             .flex_col()
-            .bg(WHITE)
-            .text_color(BLACK)
+            .bg(BG)
+            .text_color(FG)
             .font_family(MONO)
             .text_size(px(15.0))
             .child(header(state))
@@ -660,11 +675,26 @@ fn main() {
                     clip,
                     focus: cx.focus_handle(),
                     list_scroll: UniformListScrollHandle::new(),
+                    activation_sub: None,
                 });
+                // SPEC §2: reload on window activation (refocusing after
+                // alt-tab lands focus back on the root handle).
+                let shell = entity.downgrade();
+                let activation_focus = entity.read(cx).focus.clone();
+                let activation_sub =
+                    window.on_focus_in(&activation_focus, cx, move |_window, cx| {
+                        let _ = shell.update(cx, |shell, cx| {
+                            if shell.state.check_external_changes() {
+                                cx.notify();
+                            }
+                        });
+                    });
+
                 // Key dispatch requires a focused handle; without this the
                 // window is keyboard-dead until clicked.
                 entity.update(cx, |shell, _| {
                     shell.focus.focus(window);
+                    shell.activation_sub = Some(activation_sub);
                 });
 
                 // Poll for external (CLI/agent) database changes every 2s.

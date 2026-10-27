@@ -753,8 +753,26 @@ fn ngg_with_count_lands_and_leaves_no_pending() {
 
 #[test]
 fn repeat_preserves_original_count() {
+    // `.` after 5x must complete 5 MORE (not 1) — distinguishable only when
+    // enough rows remain.
     let mut f = fx();
-    seed(&mut f, &["a", "b", "c", "d", "e", "f"]);
+    let names: Vec<&str> = (0..12)
+        .map(|i| match i {
+            0 => "t00",
+            1 => "t01",
+            2 => "t02",
+            3 => "t03",
+            4 => "t04",
+            5 => "t05",
+            6 => "t06",
+            7 => "t07",
+            8 => "t08",
+            9 => "t09",
+            10 => "t10",
+            _ => "t11",
+        })
+        .collect();
+    seed(&mut f, &names);
     feed(&mut f, "5 x");
     let done = |st: &GuiState| {
         st.store
@@ -766,7 +784,11 @@ fn repeat_preserves_original_count() {
     };
     assert_eq!(done(&f.state), 5);
     feed(&mut f, ".");
-    assert_eq!(done(&f.state), 6, "bare `.` reuses the original count (5x)");
+    assert_eq!(
+        done(&f.state),
+        10,
+        "bare `.` reuses the original count (5x)"
+    );
 }
 
 #[test]
