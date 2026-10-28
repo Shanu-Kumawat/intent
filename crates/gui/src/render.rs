@@ -47,11 +47,13 @@ pub fn line_segments(engine: &Engine, line_ix: usize, focused: bool) -> Vec<Edit
 
     let mut segs: Vec<EditSeg> = Vec::new();
     let mut ix = 0usize;
+    let mut bar_done = false;
     while ix < chars.len() {
-        if insert_caret && cur_c == ix {
+        // The insert caret is a bar drawn *before* the character at the
+        // cursor — the character itself must still render.
+        if insert_caret && !bar_done && cur_c == ix {
             segs.push(EditSeg::CaretBar);
-            ix += 1;
-            continue;
+            bar_done = true;
         }
         let in_sel = s_start <= ix && ix < s_end;
         let inverse = in_sel || (block_caret && cur_c == ix);
@@ -72,7 +74,7 @@ pub fn line_segments(engine: &Engine, line_ix: usize, focused: bool) -> Vec<Edit
         segs.push(EditSeg::Text(chars[ix..ix + len].iter().collect(), inverse));
         ix += len;
     }
-    if insert_caret && cur_c >= chars.len() {
+    if insert_caret && !bar_done {
         segs.push(EditSeg::CaretBar);
     } else if block_caret && cur_c >= chars.len() {
         // NORMAL on an empty line: block on a virtual space.
@@ -132,7 +134,20 @@ mod tests {
         e.handle(Key::new("x"));
         e.handle(Key::new("y")); // "xyhello", cursor (0,2)
         assert_eq!(e.cursor(), (0, 2));
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["xy", "|", "ello"]);
+        // The bar sits *before* the character at the cursor; that character
+        // still renders (a regression once swallowed it).
+        assert_eq!(texts(&line_segments(&e, 0, true)), ["xy", "|", "hello"]);
+    }
+
+    #[test]
+    fn insert_bar_never_hides_the_char_under_it() {
+        let mut e = engine("hello", true);
+        e.handle(Key::new("i")); // cursor (0,0), insert
+        assert_eq!(texts(&line_segments(&e, 0, true)), ["|", "hello"]);
+        let mut e = engine("abc", true);
+        e.handle(Key::new("l"));
+        e.handle(Key::new("i")); // cursor (0,1), insert before 'b'
+        assert_eq!(texts(&line_segments(&e, 0, true)), ["a", "|", "bc"]);
     }
 
     #[test]

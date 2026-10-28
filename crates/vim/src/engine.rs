@@ -382,6 +382,36 @@ impl Engine {
             }
             return EngineEvent::None;
         }
+        // Arrow keys move the caret like an ordinary editor (vim allows
+        // this in insert); up/down keep the desired column. They are
+        // recorded like typing, so `.` replays the whole insert run.
+        if !key.ctrl {
+            match key.key.as_str() {
+                "left" => {
+                    self.cursor.1 = self.cursor.1.saturating_sub(1);
+                    self.desired_col = self.cursor.1;
+                    return EngineEvent::None;
+                }
+                "right" => {
+                    self.cursor.1 = (self.cursor.1 + 1).min(self.buf.line_len(self.cursor.0));
+                    self.desired_col = self.cursor.1;
+                    return EngineEvent::None;
+                }
+                "up" | "down" => {
+                    let (l, _) = self.cursor;
+                    let target = if key.key == "up" {
+                        l.saturating_sub(1)
+                    } else {
+                        (l + 1).min(self.buf.lines.len() - 1)
+                    };
+                    if target != l {
+                        self.cursor = (target, self.desired_col.min(self.buf.line_len(target)));
+                    }
+                    return EngineEvent::None;
+                }
+                _ => {}
+            }
+        }
         if let Some(c) = plain_char(&key) {
             self.begin_change();
             self.insert_raw(c);
@@ -459,7 +489,14 @@ impl Engine {
             return;
         }
         self.mode = Mode::Normal;
-        self.cursor = self.buf.clamp_normal(self.cursor);
+        // Vim: leaving insert backs the cursor onto the last character —
+        // it never rests just past text — except at the start of a line.
+        // Back up from the raw insert position (col may equal the line
+        // length here), then clamp to the buffer; clamp_normal would pull
+        // onto the last char *and* this would shift twice.
+        self.cursor.1 = self.cursor.1.saturating_sub(1);
+        let line = self.cursor.0.min(self.buf.lines.len() - 1);
+        self.cursor = (line, self.cursor.1.min(self.buf.line_len(line)));
         self.desired_col = self.cursor.1;
         self.end_change();
         if self.replaying == 0 && !self.last_trigger.is_empty() {

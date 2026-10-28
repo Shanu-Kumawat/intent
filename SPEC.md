@@ -308,11 +308,15 @@ documented no-op with a status message, not a crash):
 - **Text objects:** `iw aw i" a" i' a' i( a( ib ab`
 - **Counts:** before operators and motions (`3dd`, `d2w`, `2j`)
 - **Insert entries:** `i a I A o O` (`o`/`O` only in NOTES; in TITLE they
-  behave like `A`), `esc`/`ctrl-c` exit insert
+  behave like `A`), `esc`/`ctrl-c` exit insert (cursor rule below)
 - **Insert mode:** printable ASCII, `enter` (split line, NOTES only; in TITLE
   a no-op message), `backspace` (join to previous line in NOTES; start of
   TITLE no-op), `tab` = 4 spaces, `ctrl-w` delete word back, `ctrl-u` delete back to where this insert run
-  started on the line (typed text is cleared; pre-existing text survives)
+  started on the line (typed text is cleared; pre-existing text survives),
+  arrow keys move the caret (up/down keep the desired column; `.` replays
+  the whole run including movements). `esc`/`ctrl-c` leave insert the way
+  vim does: the cursor backs onto the last character — never resting just
+  past text — except at the start of a line.
 - **Paste:** `p P` (§4.5), **Visual:** char-wise `v`, line-wise `V`; motions
   extend; `d x c y ~` operate on selection; `esc` cancels
 - **Undo/redo:** `u`, `ctrl-r` per field buffer (§5)

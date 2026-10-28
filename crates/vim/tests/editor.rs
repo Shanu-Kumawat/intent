@@ -743,3 +743,51 @@ fn yank_then_paste_survives_intervening_undo() {
         "yanked register survived the undo"
     );
 }
+
+// ---- insert-mode arrow keys (editor-grade insert) ---------------------------
+
+#[test]
+fn insert_arrows_move_within_the_line() {
+    let (mut e, _c) = engine("hello");
+    feed(&mut e, "i <left> <left>"); // cursor (0,0), still insert
+    assert_eq!(e.cursor(), (0, 0));
+    feed(&mut e, "<right> <right>");
+    assert_eq!(e.cursor(), (0, 2), "right moves within the line");
+    feed(&mut e, "X"); // inserts before 'l' of "llo"
+    feed(&mut e, "<esc>");
+    assert_eq!(e.text(), "heXllo");
+    assert_eq!(e.cursor(), (0, 2), "esc backs onto the inserted char (vim)");
+}
+
+#[test]
+fn insert_right_stops_at_end_of_line_and_can_insert_there() {
+    let (mut e, _c) = engine("ab");
+    feed(&mut e, "i <right> <right> <right> <right>");
+    assert_eq!(e.cursor(), (0, 2), "right clamps at EOL (insert position)");
+    feed(&mut e, "c <esc>");
+    assert_eq!(e.text(), "abc");
+}
+
+#[test]
+fn insert_up_down_move_lines_with_desired_column() {
+    let (mut e, _c) = engine("alpha\nbeta\ngamma");
+    // start insert at end of "alpha" (col 5), then move down twice.
+    feed(&mut e, "A <down> <down>");
+    assert_eq!(
+        e.cursor(),
+        (2, 5),
+        "desired column kept, clamped to 'gamma'"
+    );
+    feed(&mut e, "! <esc>");
+    assert_eq!(
+        e.text(),
+        "alpha\nbeta\ngamma!",
+        "typed at the clamped column"
+    );
+    // up/down from mid-text keep the desired column too.
+    feed(&mut e, "gg"); // (0,0) normal
+    feed(&mut e, "i <down> <down>");
+    assert_eq!(e.cursor(), (2, 0));
+    feed(&mut e, "<up> <esc>");
+    assert_eq!(e.cursor(), (1, 0));
+}
