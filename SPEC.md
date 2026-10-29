@@ -345,7 +345,7 @@ command (no cursor task, empty list) is an error message, not a crash.
 
 ```
 :inbox :today :upcoming :completed :archived   switch views
-:new [title]        capture (empty title → capture prompt)
+:new [title] / :capture [title]        capture (empty title → capture prompt)
 :due <date|none>    :remind <date|none>    :defer <date|none>
 :project <name|none>  :tag +tag  :tag -tag
 :organize           leave inbox (no project change)

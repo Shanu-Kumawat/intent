@@ -154,8 +154,13 @@ enum Cmd {
 fn main() {
     // Completions bypass the database entirely. Detect the subcommand as the
     // first non-flag argument so global flags (--json etc.) still compose.
-    let first_positional = std::env::args().skip(1).find(|a| !a.starts_with('-'));
-    if first_positional.as_deref() == Some("completions") {
+    // args_os: std::env::args() panics on non-UTF-8 arguments — that would
+    // bypass clap's graceful "invalid utf-8" usage error (exit 2).
+    let first_positional = std::env::args_os()
+        .skip(1)
+        .find(|a| !a.to_string_lossy().starts_with('-'))
+        .filter(|a| a.to_string_lossy() == "completions");
+    if first_positional.is_some() {
         match Cli::try_parse() {
             Ok(Cli {
                 command: Cmd::Completions { shell },
@@ -171,7 +176,7 @@ fn main() {
             }
             Err(err) => {
                 // SPEC §3: with --json present, usage errors are JSON too.
-                if std::env::args().any(|a| a == "--json") {
+                if std::env::args_os().any(|a| a == *"--json") {
                     let payload =
                         serde_json::json!({"error": {"code": "usage", "message": err.to_string()}});
                     eprintln!("{payload}");
@@ -187,7 +192,7 @@ fn main() {
         Ok(c) => c,
         Err(err) => {
             // Usage errors honor --json too (SPEC §3): check raw args.
-            if std::env::args().any(|a| a == "--json") {
+            if std::env::args_os().any(|a| a == *"--json") {
                 let payload =
                     serde_json::json!({"error": {"code": "usage", "message": err.to_string()}});
                 eprintln!("{payload}");

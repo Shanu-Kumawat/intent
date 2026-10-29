@@ -92,6 +92,7 @@ struct Shell {
 
 impl Shell {
     fn dispatch_key(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let view_before = (self.state.cursor, self.state.rows.len());
         let ks = &event.keystroke;
         if ks.modifiers.alt || ks.modifiers.platform || ks.modifiers.function {
             return;
@@ -115,7 +116,10 @@ impl Shell {
             cx.quit();
             return;
         }
-        if self.state.editor.is_none() {
+        // Recenter only when the key moved the cursor or changed the rows;
+        // the user's manual scroll position survives no-op keys.
+        if self.state.editor.is_none() && (self.state.cursor, self.state.rows.len()) != view_before
+        {
             self.list_scroll
                 .scroll_to_item(self.state.cursor, ScrollStrategy::Center);
         }
@@ -366,10 +370,7 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
     let Some(p) = &state.prompt else {
         return div().h_0().into_any_element();
     };
-    let mut input = p.input.clone();
-    if p.kind != PromptKind::Command && !p.input.is_empty() {
-        input = p.input.clone();
-    }
+    let input = p.input.clone();
     let caret = if p.kind == PromptKind::ConfirmDelete {
         ""
     } else {
@@ -476,15 +477,15 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
 
 fn help_overlay() -> gpui::AnyElement {
     let keys: &[&str] = &[
-        "j k g g G        move        1-4  switch view",
+        "j k ↑ ↓ g g G   move        1-4  switch view",
         "ctrl-d/ctrl-u    jump ±10    tab  cycle view",
-        "o / SPC SPC      capture     /    search",
+        "o SPC SPC c      capture     /    search",
         "enter / i / a    edit task   ?    this help",
         "x                complete    d    archive",
         "SPC d/u/r        defer/due/remind prompt",
         "SPC o            organize    > <  shift due ±1",
         "SPC D            unarchive   SPC p  paste system clipboard",
-        "+ -              priority    .    repeat",
+        "+ - =            priority    .    repeat",
         "y Y              yank        V    visual mode",
         "D                delete      u ctrl-r undo/redo",
         ":                commands    esc  cancel",
@@ -657,6 +658,13 @@ fn main() {
             },
         );
         let _ = window;
+        // Closing the window through the WM must end the process: gpui does
+        // not quit on the last window close by default, and the poll task
+        // would otherwise spin headless forever, holding the store.
+        // Normal exits (:q) already quit; this catches the WM path. The
+        // subscription lives for the app's lifetime, which is exactly what
+        // we want — drop it.
+        let _ = cx.on_window_closed(|cx| cx.quit());
         cx.activate(true);
     });
 }

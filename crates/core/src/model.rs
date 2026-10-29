@@ -63,10 +63,12 @@ pub enum Priority {
 impl Priority {
     pub fn parse(s: &str) -> Option<Priority> {
         Some(match s.trim().to_ascii_lowercase().as_str() {
-            "none" | "-" | "0" => Priority::None,
-            "low" | "l" | "1" => Priority::Low,
-            "medium" | "med" | "m" | "2" => Priority::Medium,
-            "high" | "hi" | "h" | "3" => Priority::High,
+            // Exactly the documented set (SPEC §3, --priority help):
+            // full names plus the -/l/m/h aliases.
+            "none" | "-" => Priority::None,
+            "low" | "l" => Priority::Low,
+            "medium" | "m" => Priority::Medium,
+            "high" | "h" => Priority::High,
             _ => return None,
         })
     }

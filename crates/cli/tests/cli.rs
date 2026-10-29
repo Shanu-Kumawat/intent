@@ -411,3 +411,59 @@ fn version_and_help() {
 // Silence unused warnings for HashMap import if not needed elsewhere.
 #[allow(dead_code)]
 fn _typecheck(_: Option<HashMap<String, i32>>) {}
+
+// ---- sweep round 2 regressions ------------------------------------------------
+
+#[test]
+fn empty_tag_strings_are_dropped() {
+    let e = Env::new("empty-tags");
+    let id = e.json(&["add", "tagged", "--tags", ",,", "--json"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let v = e.json(&["show", &id, "--json"]);
+    assert_eq!(
+        v["tags"].as_array().unwrap().len(),
+        0,
+        "empty strings are not tags: {v}"
+    );
+}
+
+#[test]
+fn undocumented_priority_aliases_are_rejected() {
+    let e = Env::new("pri-aliases");
+    let id = e.json(&["add", "t", "--json"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for alias in ["0", "1", "2", "3", "med", "hi"] {
+        let (code, _) = e.fails(&["prioritize", &id, alias]);
+        assert_eq!(code, 4, "alias {alias:?} must be a bad_value usage error");
+    }
+    // documented aliases keep working
+    e.ok(&["prioritize", &id, "-"]);
+    e.ok(&["prioritize", &id, "l"]);
+    e.ok(&["prioritize", &id, "m"]);
+    e.ok(&["prioritize", &id, "h"]);
+}
+
+#[test]
+fn non_utf8_argument_is_a_usage_error_not_a_panic() {
+    let e = Env::new("non-utf8");
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let bad = std::ffi::OsStr::from_bytes(&[0xff, 0xfe]);
+        let out = Command::new(env!("CARGO_BIN_EXE_intent"))
+            .arg("add")
+            .arg(bad)
+            .env("INTENT_DB", &e.db)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "invalid utf-8 must be clap's usage error, not a panic (exit 101)"
+        );
+    }
+}

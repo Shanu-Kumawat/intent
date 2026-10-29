@@ -37,7 +37,12 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
                     Some(p) if is_clear_marker(p) => None,
                     Some(p) => Some(p.to_string()),
                 },
-                tags: tags.clone().unwrap_or_default(),
+                tags: tags
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|t| !t.is_empty())
+                    .collect(),
                 due: parse_opt_date(due.as_deref())?,
                 remind: parse_opt_date(remind.as_deref())?,
                 no_inbox: *no_inbox,
@@ -110,7 +115,7 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
                 final_tags = Some(store.get_task(id.trim())?.tags);
             }
             if let Some(t) = final_tags {
-                let mut t = t;
+                let mut t: Vec<String> = t.into_iter().filter(|x| !x.is_empty()).collect();
                 if let Some(add) = tag_add {
                     for a in add {
                         if !t.contains(a) {
@@ -175,9 +180,10 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
             if !*force {
                 use std::io::IsTerminal;
                 if std::io::stdin().is_terminal() {
-                    print!("permanently delete {id}? [y/N] ");
+                    // stderr: under --json, stdout stays pure JSON (SPEC §3).
                     use std::io::Write;
-                    let _ = std::io::stdout().flush();
+                    eprint!("permanently delete {id}? [y/N] ");
+                    let _ = std::io::stderr().flush();
                     let mut line = String::new();
                     std::io::stdin().read_line(&mut line).ok();
                     let ans = line.trim().to_ascii_lowercase();
