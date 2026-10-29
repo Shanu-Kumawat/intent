@@ -59,6 +59,14 @@ pub struct Prompt {
     pub target_id: Option<String>,
 }
 
+/// How the editor was entered from the list (SPEC §4.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorEntry {
+    Normal,
+    Insert,
+    Append,
+}
+
 pub struct EditorState {
     pub task_id: String,
     pub title: Engine,
@@ -425,6 +433,10 @@ impl GuiState {
             }
             PromptKind::Search => {
                 let q = prompt.input.trim().to_string();
+                // refresh() records the (reset) cursor for this view; the
+                // search must not clobber the view's remembered position —
+                // it is restored by esc via pre_search_task.
+                let remembered = self.cursors.get(&self.view).copied();
                 if q.is_empty() {
                     self.set_status("search cleared");
                     self.search_query = None;
@@ -434,6 +446,9 @@ impl GuiState {
                     self.set_status(format!("search: {q}"));
                 }
                 self.refresh();
+                if let Some(c) = remembered {
+                    self.cursors.insert(self.view, c);
+                }
             }
             PromptKind::Command => {
                 let line = prompt.input.trim();
@@ -680,7 +695,7 @@ impl GuiState {
 
     // ---- editor -----------------------------------------------------------------
 
-    fn open_editor(&mut self, id: &str, insert_mode: bool) {
+    fn open_editor(&mut self, id: &str, entry: EditorEntry) {
         let Ok(task) = self.store.get_task(id) else {
             self.set_status("task vanished");
             return;
@@ -688,8 +703,16 @@ impl GuiState {
         let clip_box = || Box::new(SharedClipboard(self.clipboard.clone()));
         let mut title = Engine::new(&task.title, true, clip_box());
         let mut notes = Engine::new(&task.notes, false, clip_box());
-        if insert_mode {
-            title.handle(Key::shifted("a"));
+        match entry {
+            // `enter`: open in NORMAL. `a`: insert after the last char.
+            // `i`: insert mode at the cursor — distinct entries, like vim.
+            EditorEntry::Normal => {}
+            EditorEntry::Insert => {
+                title.handle(Key::new("i"));
+            }
+            EditorEntry::Append => {
+                title.handle(Key::shifted("a"));
+            }
         }
         let _ = &mut notes;
         let seed = self.list_edit_buffer.clone();
@@ -742,20 +765,35 @@ impl GuiState {
             .unwrap_or(intent_vim::Mode::Normal);
         let editor_task = self.editor.as_ref().map(|e| e.task_id.clone());
 
+        // Pending sequences always win: the GUI leader and the engine's
+        // operator-pending state must not coexist invisibly (a stale `d`
+        // firing later wrote through destructively).
+        if !self.pending.is_empty() {
+            self.handle_list_pending(key.clone());
+            return;
+        }
+        let engine_pending = self
+            .editor
+            .as_ref()
+            .map(|e| !e.focused().pending_display().is_empty())
+            .unwrap_or(false);
+
         // Tab advances fields in normal/visual; in insert it types spaces.
-        if key.is_tab() && !key.ctrl && engine_mode != intent_vim::Mode::Insert {
-            self.switch_editor_field(!focus_title, true);
+        // With a sequence pending (either layer) it routes through the
+        // pending handler instead of silently switching fields.
+        if key.is_tab() && !key.ctrl && engine_mode != intent_vim::Mode::Insert && !engine_pending {
+            // shift-tab goes to the previous field (title), tab advances.
+            let to_title = if key.shift { true } else { !focus_title };
+            self.switch_editor_field(to_title, true);
             return;
         }
 
-        // Leader: active in normal/visual only (insert types spaces).
+        // Leader: active in normal/visual only (insert types spaces), and
+        // never while the engine has an operator pending — space goes to
+        // the engine then, like vim (where it is not a motion either).
         let in_text_insert = engine_mode == intent_vim::Mode::Insert;
-        if key.key == "space" && !key.ctrl && !in_text_insert {
+        if key.key == "space" && !key.ctrl && !in_text_insert && !engine_pending {
             self.pending.push(key.clone());
-            return;
-        }
-        if !self.pending.is_empty() {
-            self.handle_list_pending(key.clone());
             return;
         }
 
@@ -860,6 +898,9 @@ impl GuiState {
         let max = self.rows.len().saturating_sub(1) as isize;
         let target = (self.cursor as isize + n).clamp(0, max);
         self.cursor = target as usize;
+        // Plain navigation is remembered per view (SPEC §2: unfocused view
+        // state survives) — refresh alone would leave the map stale.
+        self.cursors.insert(self.view, self.cursor);
     }
 
     fn pending_is_count_only(&self) -> bool {
@@ -888,6 +929,18 @@ impl GuiState {
             }
             return;
         }
+        // Leader continuation also works from visual (SPEC: space is always
+        // the leader, on every surface, in every mode).
+        if self.pending.iter().any(|k| k.key == "space") {
+            self.pending.push(key.clone());
+            let seq = std::mem::take(&mut self.pending);
+            if seq.first().map(|k| k.key == "space").unwrap_or(false) {
+                self.run_leader(seq);
+            } else {
+                self.set_status("leader takes no count");
+            }
+            return;
+        }
         if self.visual_anchor.is_some() {
             self.handle_visual_key(key);
             return;
@@ -897,11 +950,17 @@ impl GuiState {
 
     /// One key in list-normal mode, including pending counts, leader, and `g`.
     fn handle_list_pending(&mut self, key: Key) {
-        // Leader continuation (space was pressed earlier).
+        // Leader continuation (space was pressed earlier). A count before
+        // the space makes it NOT a leader sequence (`5 SPC d` must not
+        // fire capture).
         if self.pending.iter().any(|k| k.key == "space") {
             self.pending.push(key.clone());
             let seq = std::mem::take(&mut self.pending);
-            self.run_leader(seq);
+            if seq.first().map(|k| k.key == "space").unwrap_or(false) {
+                self.run_leader(seq);
+            } else {
+                self.set_status("leader takes no count");
+            }
             return;
         }
 
@@ -951,7 +1010,7 @@ impl GuiState {
                 }
                 "enter" => {
                     self.pending.clear();
-                    self.open_cursor_editor(false);
+                    self.open_cursor_editor(EditorEntry::Normal);
                 }
                 "space" => self.pending.push(key.clone()),
                 _ => {}
@@ -989,7 +1048,8 @@ impl GuiState {
                     '3' => self.switch_view(TaskView::Upcoming),
                     '4' => self.switch_view(TaskView::Completed),
                     '5'..='9' => self.pending.push(key),
-                    _ => {}
+                    // 0 cannot start a count and there is no column axis.
+                    _ => self.set_status("0 is unbound in the list (counts start at 5)"),
                 }
             } else if self.pending_is_count_only() {
                 self.pending.push(key);
@@ -1043,7 +1103,8 @@ impl GuiState {
                 }
             }
             'o' => self.open_prompt(PromptKind::Capture, None),
-            'i' | 'a' => self.open_cursor_editor(true),
+            'i' => self.open_cursor_editor(EditorEntry::Insert),
+            'a' => self.open_cursor_editor(EditorEntry::Append),
             '/' => {
                 self.pre_search_task = self.cursor_task().map(|t| t.id.clone());
                 self.open_prompt(PromptKind::Search, None);
@@ -1085,6 +1146,7 @@ impl GuiState {
 
     fn move_cursor_to(&mut self, idx: usize) {
         self.cursor = idx.min(self.rows.len().saturating_sub(1));
+        self.cursors.insert(self.view, self.cursor);
     }
 
     fn run_leader(&mut self, seq: Vec<Key>) {
@@ -1177,11 +1239,18 @@ impl GuiState {
                 self.visual_anchor = None;
                 return;
             }
+            (false, "space") => {
+                self.pending.push(key.clone());
+                return;
+            }
             _ => {}
         }
         if key.is_esc() {
             self.visual_anchor = None;
+            return;
         }
+        // Never a silent no-op (SPEC §4.1).
+        self.set_status(format!("unbound in visual: {}", key.display()));
     }
 
     fn visual_range(&self) -> (usize, usize) {
@@ -1196,11 +1265,11 @@ impl GuiState {
 
     // ---- task operations ---------------------------------------------------------
 
-    fn open_cursor_editor(&mut self, insert: bool) {
+    fn open_cursor_editor(&mut self, entry: EditorEntry) {
         match self.cursor_task() {
             Some(t) => {
                 let id = t.id.clone();
-                self.open_editor(&id, insert);
+                self.open_editor(&id, entry);
             }
             None => self.set_status("nothing to open"),
         }
@@ -1227,6 +1296,10 @@ impl GuiState {
     }
 
     fn complete_ids(&mut self, ids: Vec<String>) {
+        if ids.is_empty() {
+            self.set_status("nothing to complete");
+            return;
+        }
         // One transaction for the whole batch (SPEC §2): partial results are
         // impossible, and the undo entry only exists after a successful
         // commit.
@@ -1260,6 +1333,10 @@ impl GuiState {
     }
 
     fn archive_ids(&mut self, ids: Vec<String>) {
+        if ids.is_empty() {
+            self.set_status("nothing to archive");
+            return;
+        }
         match ops::archive_many(&self.store, &ids) {
             Ok(changes) if !changes.is_empty() => {
                 self.follow_id = Some(changes[0].id.clone());

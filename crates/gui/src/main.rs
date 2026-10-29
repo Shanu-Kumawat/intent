@@ -477,8 +477,9 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
 fn help_overlay() -> gpui::AnyElement {
     let keys: &[&str] = &[
         "j k g g G        move        1-4  switch view",
-        "o / SPC SPC      capture     tab  cycle view",
-        "enter / i        edit task   /    search",
+        "ctrl-d/ctrl-u    jump ±10    tab  cycle view",
+        "o / SPC SPC      capture     /    search",
+        "enter / i / a    edit task   ?    this help",
         "x                complete    d    archive",
         "SPC d/u/r        defer/due/remind prompt",
         "SPC o            organize    > <  shift due ±1",
@@ -486,7 +487,7 @@ fn help_overlay() -> gpui::AnyElement {
         "+ -              priority    .    repeat",
         "y Y              yank        V    visual mode",
         "D                delete      u ctrl-r undo/redo",
-        ":                commands    ?    this help",
+        ":                commands    esc  cancel",
     ];
     div()
         .absolute()

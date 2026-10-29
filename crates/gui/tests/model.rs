@@ -1102,3 +1102,143 @@ fn capture_in_today_keeps_cursor_on_existing_task() {
         "the undated capture does not enter Today"
     );
 }
+
+// ---- sweep round regressions -------------------------------------------------
+
+#[test]
+fn search_then_view_switch_keeps_remembered_cursor() {
+    // SPEC §2: unfocused view state (cursor per view) survives — a search
+    // commit must not reset the view's remembered cursor.
+    let mut f = fx();
+    seed(&mut f, &["alpha thing", "plain", "beta thing", "gamma"]);
+    feed(&mut f, "j j j"); // cursor row 3
+    feed(&mut f, "/");
+    type_prompt_text(&mut f, "thing");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.rows.len(), 2);
+    feed(&mut f, "2"); // Today (empty)
+    feed(&mut f, "1"); // back to Inbox
+    assert_eq!(f.state.cursor, 3, "remembered inbox cursor survives search");
+}
+
+#[test]
+fn count_then_leader_is_not_a_leader_sequence() {
+    let mut f = fx();
+    seed(&mut f, &["a"]);
+    feed(&mut f, "5 <space> d");
+    assert!(
+        f.state.prompt.is_none(),
+        "count + SPC must not fire the leader"
+    );
+    assert!(!f.state.status.is_empty(), "rejected with a message");
+}
+
+#[test]
+fn editor_engine_pending_blocks_leader_and_fires_first() {
+    let mut f = fx();
+    seed(&mut f, &["abc"]);
+    feed(&mut f, "<cr>"); // editor, title "abc"
+    feed(&mut f, "d"); // engine operator pending
+    feed(&mut f, "<space>"); // must NOT arm the GUI leader
+    feed(&mut f, "<esc>"); // cancels the operator AND closes the editor (normal)
+    feed(&mut f, "<cr>"); // reopen: the stale `d` must not have fired
+    feed(&mut f, "w");
+    assert_eq!(
+        f.state.editor.as_ref().unwrap().title.text(),
+        "abc",
+        "the stale `d` must not complete as dw later"
+    );
+    feed(&mut f, "<esc>");
+    feed(&mut f, "<esc>");
+}
+
+#[test]
+fn editor_tab_with_pending_goes_through_pending() {
+    let mut f = fx();
+    seed(&mut f, &["abc"]);
+    feed(&mut f, "<cr>");
+    feed(&mut f, "<space>"); // leader armed
+    feed(&mut f, "tab");
+    assert!(
+        f.state.editor.as_ref().unwrap().focus_title,
+        "tab while the leader is pending must not switch fields"
+    );
+    assert!(!f.state.status.is_empty(), "leader rejection is visible");
+    feed(&mut f, "<esc>");
+}
+
+#[test]
+fn list_i_inserts_at_cursor_a_appends() {
+    let mut f = fx();
+    seed(&mut f, &["abc"]);
+    feed(&mut f, "i");
+    assert!(f.state.editor.is_some());
+    type_prompt_text(&mut f, "X");
+    feed(&mut f, "<esc>");
+    feed(&mut f, "<esc>");
+    assert_eq!(
+        f.state.store.get_task(&f.state.rows[0].id).unwrap().title,
+        "Xabc",
+        "i inserts before the first char"
+    );
+    feed(&mut f, "a");
+    type_prompt_text(&mut f, "Y");
+    feed(&mut f, "<esc>");
+    feed(&mut f, "<esc>");
+    assert_eq!(
+        f.state.store.get_task(&f.state.rows[0].id).unwrap().title,
+        "XabcY",
+        "a appends at the end"
+    );
+}
+
+#[test]
+fn visual_mode_leader_works_and_unbound_keys_report() {
+    let mut f = fx();
+    seed(&mut f, &["a", "b"]);
+    feed(&mut f, "V <space> d");
+    assert!(
+        matches!(
+            f.state.prompt.as_ref().map(|p| p.kind),
+            Some(PromptKind::Defer)
+        ),
+        "leader works inside visual mode"
+    );
+    feed(&mut f, "<esc>");
+    feed(&mut f, "V");
+    feed(&mut f, "z");
+    assert!(
+        f.state.status.contains("unbound"),
+        "unbound visual keys are never silent"
+    );
+}
+
+#[test]
+fn zero_and_empty_list_ops_report() {
+    let mut f = fx();
+    seed(&mut f, &["a"]);
+    feed(&mut f, "0");
+    assert!(!f.state.status.is_empty(), "0 reports instead of silence");
+    // empty list: x and d report like D does
+    f.state.switch_view(TaskView::Today); // empty
+    feed(&mut f, "x");
+    assert!(!f.state.status.is_empty(), "x on an empty list reports");
+    feed(&mut f, "d");
+    assert!(!f.state.status.is_empty(), "d on an empty list reports");
+}
+
+#[test]
+fn editor_shift_tab_returns_to_title() {
+    let mut f = fx();
+    seed(&mut f, &["abc"]);
+    feed(&mut f, "<cr>");
+    feed(&mut f, "tab"); // title -> notes
+    assert!(!f.state.editor.as_ref().unwrap().focus_title);
+    feed(&mut f, "<stab>");
+    assert!(
+        f.state.editor.as_ref().unwrap().focus_title,
+        "shift-tab goes back to the title"
+    );
+    feed(&mut f, "<esc>");
+    feed(&mut f, "<esc>");
+}

@@ -146,14 +146,28 @@ pub fn parse_date(input: &str, today: Date) -> Result<Date> {
                     .find(|c: char| c.is_ascii_alphabetic())
                     .unwrap_or(rest.len());
                 let (digits, unit) = rest.split_at(split);
-                let unit = if unit.is_empty() { "d" } else { unit };
-                match (digits.parse::<i64>(), unit) {
-                    (Ok(n), "d") => (n, 'd'),
-                    (Ok(n), "w") => (n, 'w'),
-                    (Ok(n), "m") => (n, 'm'),
-                    (Ok(n), "y") => (n, 'y'),
-                    _ => return Err(CoreError::BadDate(format!("unrecognized date: {input}"))),
+                // Strict §1.4 grammar: the sign lives in the ± prefix (so
+                // `+-3d` is junk) and nothing may follow the single unit
+                // letter (`+3w2d` is an error, not silently +3w).
+                if !digits.is_empty() && !digits.chars().all(|c| c.is_ascii_digit()) {
+                    return Err(CoreError::BadDate(format!("unrecognized date: {input}")));
                 }
+                let unit = match unit {
+                    "" => 'd',
+                    "d" | "w" | "m" | "y" => unit.chars().next().unwrap(),
+                    _ => return Err(CoreError::BadDate(format!("unrecognized date: {input}"))),
+                };
+                let n: i64 = if digits.is_empty() {
+                    1
+                } else {
+                    match digits.parse::<i64>() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            return Err(CoreError::BadDate(format!("unrecognized date: {input}")))
+                        }
+                    }
+                };
+                (n, unit)
             }
         };
         let n = if negative { -n } else { n };

@@ -147,9 +147,11 @@ impl Store {
                 )?;
             }
             Some(v) => {
-                let v: i64 = v
-                    .parse()
-                    .map_err(|_| CoreError::Db(rusqlite::Error::QueryReturnedNoRows))?;
+                let v: i64 = v.parse().map_err(|_| {
+                    crate::error::bad_value(format!(
+                        "meta.schema_version is not a number ({v:?}); the database file may be corrupt"
+                    ))
+                })?;
                 if v > SCHEMA_VERSION {
                     return Err(crate::error::bad_value(format!(
                         "database schema version {v} is newer than this build supports ({SCHEMA_VERSION}); upgrade the app"
@@ -166,7 +168,13 @@ impl Store {
     /// Begin a transaction. Every multi-row mutation must run inside one so
     /// a failure mid-batch leaves the database untouched (SPEC §2).
     pub fn transaction(&self) -> Result<rusqlite::Transaction<'_>> {
-        self.conn.unchecked_transaction().map_err(Into::into)
+        // BEGIN IMMEDIATE, not the default deferred BEGIN: the batch ops
+        // read then write, and SQLite never invokes the busy handler for
+        // SQLITE_BUSY_SNAPSHOT on a deferred transaction — an overlapping
+        // CLI write would fail the whole batch with a spurious lock error.
+        // Taking the write lock up front lets busy_timeout cover the batch.
+        rusqlite::Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)
+            .map_err(Into::into)
     }
 
     /// Escape hatch for ops that must compose inside a transaction

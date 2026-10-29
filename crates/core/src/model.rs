@@ -272,7 +272,7 @@ impl TaskPatch {
 
     /// Per SPEC §1.2, these assignments take a task out of the inbox.
     fn leaves_inbox(&self) -> bool {
-        matches!(self.project, Patch::Set(_))
+        matches!(&self.project, Patch::Set(p) if !p.is_empty())
             || matches!(self.due, Patch::Set(_))
             || matches!(self.remind, Patch::Set(_))
             || self.organize
@@ -341,7 +341,12 @@ impl NewTask {
     pub fn inbox(&self) -> bool {
         // Consistent with SPEC §1.2: assigning project/due/remind at capture
         // time implies the task is already organized.
-        !self.no_inbox && self.project.is_none() && self.due.is_none() && self.remind.is_none()
+        // An empty project string is not "organized" (ops::add filters it
+        // out), so it must not pull the capture out of the inbox either.
+        !self.no_inbox
+            && self.project.as_deref().filter(|p| !p.is_empty()).is_none()
+            && self.due.is_none()
+            && self.remind.is_none()
     }
 
     pub fn validate(&self) -> Result<()> {

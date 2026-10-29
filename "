@@ -1,0 +1,11 @@
+367:        if key.ctrl && key.key == "u" {
+401:                "up" | "down" => {
+403:                    let target = if key.key == "up" {
+421:        self.status = format!("unhandled key {}", key.display());
+1284:                self.status = "undo".into();
+1937:    if !keys[i].ctrl && matches!(keys[i].key.as_str(), "left" | "right" | "up" | "down") {
+1944:            "up" => Motion::Up,
+2143:    if !keys[i].ctrl && matches!(keys[i].key.as_str(), "left" | "right" | "up" | "down") {
+2147:            "up" => Motion::Up,
+2222:            if !keys[i].ctrl && matches!(keys[i].key.as_str(), "left" | "right" | "up" | "down") {
+2226:                    "up" => Motion::Up,

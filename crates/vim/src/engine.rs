@@ -84,7 +84,10 @@ enum Motion {
 impl Motion {
     fn affectedness(&self) -> Affected {
         match self {
-            Motion::WordEnd { .. } | Motion::LineEnd | Motion::Find { .. } => Affected::Inclusive,
+            Motion::WordEnd { .. }
+            | Motion::LineEnd
+            | Motion::Find { .. }
+            | Motion::FindRepeat { .. } => Affected::Inclusive,
             Motion::Up | Motion::Down | Motion::GotoLine { .. } => Affected::Linewise,
             _ => Affected::Exclusive,
         }
@@ -143,10 +146,12 @@ enum Cmd {
         count: usize,
         after: bool,
     },
-    Undo,
+    Undo {
+        count: usize,
+    },
     Redo,
     Repeat {
-        count: usize,
+        count: Option<usize>,
     },
     ToggleVisual {
         linewise: bool,
@@ -191,6 +196,12 @@ pub struct Engine {
     group_open: bool,
     applying_undo: bool,
     last_change: Vec<Key>,
+    /// Count the recorded change was made with (leading digits stripped
+    /// from the recorded keys); a bare `.` reuses it, `N.` replaces it.
+    last_count: usize,
+    /// Register content at paste-record time so `.` re-pastes the same
+    /// text even after the register changed (vim's redo buffer).
+    repeat_edit_buffer: Option<Register>,
     /// Keys of the normal-mode sequence that started the current insert run.
     last_trigger: Vec<Key>,
     insert_keys: Vec<Key>,
@@ -219,6 +230,8 @@ impl Engine {
             group_open: false,
             applying_undo: false,
             last_change: Vec::new(),
+            last_count: 1,
+            repeat_edit_buffer: None,
             last_trigger: Vec::new(),
             insert_keys: Vec::new(),
             insert_origin: None,
@@ -329,10 +342,11 @@ impl Engine {
             }
             self.begin_change();
             if self.cursor.1 == 0 {
-                let (l, c) = self.cursor;
+                let (l, _) = self.cursor;
+                let join = self.buf.lines[l - 1].len();
                 let cur: Vec<char> = self.buf.lines.remove(l);
                 self.buf.lines[l - 1].extend(cur);
-                self.cursor = (l - 1, c);
+                self.cursor = (l - 1, join); // on the join point, like vim
             } else {
                 let (l, c) = self.cursor;
                 self.buf.lines[l].remove(c - 1);
@@ -349,12 +363,10 @@ impl Engine {
             return EngineEvent::TextChanged;
         }
         if key.ctrl && key.key == "w" {
-            let mut start = self.ctrl_w_start();
-            if let Some(origin) = self.insert_origin {
-                if origin.0 == self.cursor.0 && start.1 < origin.1 {
-                    start = (origin.0, origin.1);
-                }
-            }
+            // Plain "delete word back" (SPEC §4.2) — no insert-origin clamp:
+            // vim deletes pre-existing text too, and clamping start past the
+            // cursor would silently invert the range into a forward delete.
+            let start = self.ctrl_w_start();
             if start != self.cursor {
                 self.begin_change();
                 let (a, b) = self.buf.order(start, self.cursor);
@@ -368,9 +380,11 @@ impl Engine {
         if key.ctrl && key.key == "u" {
             // Delete back to where this insert run started on this line —
             // never into text that existed before insert mode (Vim rule).
+            // A different line than the origin has no run start here: a
+            // no-op keeps pre-existing text safe (SPEC §4.2).
             let target = match self.insert_origin {
                 Some(o) if o.0 == self.cursor.0 => o.1,
-                _ => 0,
+                _ => return EngineEvent::None,
             };
             if self.cursor.1 > target {
                 self.begin_change();
@@ -512,10 +526,25 @@ impl Engine {
     // ---- normal ---------------------------------------------------------------------
 
     fn handle_normal(&mut self, key: Key) -> EngineEvent {
-        let mut ev = EngineEvent::None;
+        // Normalize the named "space" key to its character so command
+        // parsers (r, f/F/t/T) accept it like vim does.
+        if key.key == "space" && !key.ctrl {
+            return self.handle_normal_inner(Key::new(" "), EngineEvent::None);
+        }
+        self.handle_normal_inner(key, EngineEvent::None)
+    }
+
+    fn handle_normal_inner(&mut self, key: Key, mut ev: EngineEvent) -> EngineEvent {
         if key.is_esc() {
             self.pending.clear();
             self.status.clear();
+            return ev;
+        }
+        // `0` is the col-0 motion, not a count digit (vim: `0j` moves to
+        // col 0, then down). Execute it immediately when no sequence is
+        // pending; inside a sequence (`10j`, `d0`) it keeps its other roles.
+        if self.pending.is_empty() && !key.ctrl && key.chr() == Some('0') {
+            ev.merge(self.do_motion(1, Motion::LineCol0));
             return ev;
         }
         self.pending.push(key.clone());
@@ -565,26 +594,25 @@ impl Engine {
             Cmd::DeleteToEnd { count, change } => {
                 let (l, c) = self.cursor;
                 let last = (l + count.max(1) - 1).min(self.buf.line_count() - 1);
+                let len_last = self.buf.line_len(last);
+                // D is d{count}$: charwise from the cursor through the last
+                // char of line `last`. Crossing a newline (count > 1) joins
+                // the prefix with the line after; a single-line region leaves
+                // the emptied line in place; D on an empty line is a no-op.
+                if last == l && c >= self.buf.line_len(l) {
+                    return;
+                }
                 self.begin_change();
-                // Removed text: cursor-to-EOL of line l, then whole lines
-                // l+1..=last. What remains on line l is its prefix.
-                let mut removed = String::new();
-                removed.extend(&self.buf.lines[l][c..]);
-                for line in &self.buf.lines[l + 1..=last] {
-                    removed.push('\n');
-                    removed.extend(line);
-                }
-                let merged: Vec<char> = self.buf.lines[l][..c].to_vec();
-                if merged.is_empty() && !change {
-                    // Vim: D that covers whole lines removes them entirely —
-                    // no empty line is left behind (2D on "aa\nbb\ncc" → "cc").
-                    self.buf.lines.drain(l..=last);
-                    if self.buf.lines.is_empty() {
-                        self.buf.lines = vec![Vec::new()];
-                    }
+                // Single line: delete up to the line's EOL, never the
+                // newline (vim leaves the emptied line in place). Spanning
+                // multiple lines: the newline is inside the region, so the
+                // prefix joins the line after `last` (2D on "aa\nbb\ncc").
+                let end_excl = if last == l {
+                    (l, len_last)
                 } else {
-                    self.buf.lines.splice(l..=last, std::iter::once(merged));
-                }
+                    self.buf.pos_after((last, len_last))
+                };
+                let removed = self.buf.remove_charwise((l, c), end_excl);
                 self.edit_buffer = Register::charwise(removed);
                 if change {
                     self.cursor = (l, c);
@@ -645,7 +673,9 @@ impl Engine {
             }
             Cmd::ToggleCase { count } => {
                 let (l, c) = self.cursor;
-                if c + count <= self.buf.line_len(l) {
+                // Vim clamps to the end of the line (10~ on "ab" toggles both).
+                let count = count.max(1).min(self.buf.line_len(l).saturating_sub(c));
+                if count > 0 && c + count <= self.buf.line_len(l) {
                     self.begin_change();
                     for i in 0..count {
                         let ch = self.buf.lines[l][c + i];
@@ -677,11 +707,14 @@ impl Engine {
                     while next.first().map(|c| c.is_whitespace()).unwrap_or(false) {
                         next.remove(0);
                     }
+                    let join_col = self.buf.lines[l].len();
                     let cur = &mut self.buf.lines[l];
                     if !cur.is_empty() && !cur.last().map(|c| c.is_whitespace()).unwrap_or(false) {
                         cur.push(' ');
                     }
                     cur.extend(next);
+                    // Vim rests the cursor on the inserted space / join point.
+                    self.cursor = (l, join_col);
                     changed = true;
                 }
                 if changed {
@@ -728,9 +761,22 @@ impl Engine {
                 changed = true;
                 self.end_change();
                 self.record_change(keys);
+                // After record_change (which resets it): snapshot the register
+                // used so `.` re-pastes this text, not whatever is current.
+                if self.replaying == 0 {
+                    self.repeat_edit_buffer = Some(self.edit_buffer.clone());
+                }
                 self.clamp_cursor();
             }
-            Cmd::Undo => self.undo(),
+            Cmd::Undo { count } => {
+                for _ in 0..count.max(1) {
+                    let before = self.undo.len();
+                    self.undo();
+                    if self.undo.len() == before {
+                        break; // nothing left to undo
+                    }
+                }
+            }
             Cmd::Redo => self.redo(),
             Cmd::Repeat { count } => {
                 let seq = self.last_change.clone();
@@ -738,8 +784,13 @@ impl Engine {
                     self.status = "nothing to repeat".into();
                     return;
                 }
+                // A paste record re-pastes the text captured at record time.
+                let saved = self
+                    .repeat_edit_buffer
+                    .take()
+                    .map(|reg| std::mem::replace(&mut self.edit_buffer, reg));
                 self.replaying += 1;
-                for _ in 0..count.max(1) {
+                for _ in 0..count.unwrap_or(self.last_count).max(1) {
                     for k in &seq {
                         if self.handle(k.clone()) == EngineEvent::TextChanged {
                             changed = true;
@@ -747,6 +798,9 @@ impl Engine {
                     }
                 }
                 self.replaying -= 1;
+                if let Some(reg) = saved {
+                    self.edit_buffer = reg;
+                }
             }
         }
         if changed {
@@ -756,7 +810,22 @@ impl Engine {
 
     fn record_change(&mut self, keys: &[Key]) {
         if self.replaying == 0 {
-            self.last_change = keys.to_vec();
+            // A leading count belongs to the repeated command itself: store
+            // it separately so `.` reuses it and `N.` can replace it.
+            let mut n: usize = 0;
+            let mut i = 0;
+            while i < keys.len() {
+                match keys[i].chr().and_then(|c| c.to_digit(10)) {
+                    Some(d) if n > 0 || d > 0 => {
+                        n = (n * 10 + d as usize).min(100_000);
+                        i += 1;
+                    }
+                    _ => break,
+                }
+            }
+            self.last_count = if n > 0 { n } else { 1 };
+            self.repeat_edit_buffer = None;
+            self.last_change = keys[i..].to_vec();
         }
     }
 
@@ -970,6 +1039,10 @@ impl Engine {
                 } else {
                     m
                 };
+                // A find inside an operator arms `;`/`,` too (df x ;).
+                if let Motion::Find { fwd, till, ch } = m {
+                    self.find = Some((ch, fwd, till));
+                }
                 self.motion_region(count.max(1), m)
             }
         };
@@ -1022,12 +1095,22 @@ impl Engine {
         let (text, linewise) = match region.kind {
             RegionKind::Char { start, end } => {
                 let text = self.buf.remove_charwise(start, end);
-                self.cursor = self.buf.clamp_normal(start);
+                // Change continues in insert mode at the region start — no
+                // normal clamp (it would pull off the line end, breaking
+                // `s`/`cw` at EOL).
+                self.cursor = if op == OpKind::Change {
+                    start
+                } else {
+                    self.buf.clamp_normal(start)
+                };
                 (text, false)
             }
             RegionKind::Line { from, to } => {
                 let text = self.buf.remove_lines(from, to);
-                self.cursor = (from.min(self.buf.line_count() - 1), 0);
+                let line = from.min(self.buf.line_count() - 1);
+                // Vim puts the cursor on the first non-blank of the line
+                // the deletion lands on.
+                self.cursor = (line, self.buf.first_non_blank(line));
                 (text, true)
             }
         };
@@ -1083,6 +1166,12 @@ impl Engine {
                     _ => return None,
                 };
                 let dest = dest_line.min(self.buf.line_count() - 1);
+                if dest == from.0 {
+                    // Motion failed to move (dj on the last line, dk on the
+                    // first): vim aborts the operator, it never deletes the
+                    // current line.
+                    return None;
+                }
                 Some(Region::lines(from.0.min(dest), from.0.max(dest)))
             }
             _ => {
@@ -1167,13 +1256,27 @@ impl Engine {
                 let q = obj;
                 let (l, c) = self.cursor;
                 let line = &self.buf.lines[l];
-                let bound = if line.is_empty() {
-                    0
+                if line.is_empty() {
+                    return None;
+                }
+                let bound = c.min(line.len() - 1);
+                // Vim works from either quote of the pair: on a quote with an
+                // odd number of quotes before it, that quote is the CLOSING
+                // one — pair it with the previous quote instead of itself.
+                let (open, close) = if line[bound] == q {
+                    let before = line[..bound].iter().filter(|&&x| x == q).count();
+                    if before % 2 == 1 {
+                        let open = line[..bound].iter().rposition(|&x| x == q)?;
+                        (open, bound)
+                    } else {
+                        let close = line[(bound + 1)..].iter().position(|&x| x == q)? + bound + 1;
+                        (bound, close)
+                    }
                 } else {
-                    c.min(line.len() - 1)
+                    let open = line[..=bound].iter().rposition(|&x| x == q)?;
+                    let close = line[(open + 1)..].iter().position(|&x| x == q)? + open + 1;
+                    (open, close)
                 };
-                let open = line[..=bound].iter().rposition(|&x| x == q)?;
-                let close = line[(open + 1)..].iter().position(|&x| x == q)? + open + 1;
                 if inner {
                     Some(Region::char((l, open + 1), (l, close)))
                 } else {
@@ -1211,6 +1314,11 @@ impl Engine {
     }
 
     fn scan_fwd(&self, from: Pos, target: char) -> Option<Pos> {
+        // The delimiter under the cursor itself counts (vim: di( works from
+        // the closing paren).
+        if self.buf.char_at(from) == Some(target) {
+            return Some(from);
+        }
         let mut p = from;
         loop {
             let next = self.buf.pos_after(p);
@@ -1597,9 +1705,11 @@ fn probe_motion(eng: &Engine, count: usize, motion: Motion) -> Option<Pos> {
     match motion {
         Motion::Left => Some((from.0, from.1.saturating_sub(count))),
         Motion::Right => {
+            // Operator region end (exclusive): the last chars of the line
+            // must be reachable — `s`/`cl`/`dl` delete through EOL. Plain
+            // movement clamps separately in do_motion.
             let len = eng.buf.line_len(from.0);
-            let max = if len == 0 { 0 } else { len - 1 };
-            Some((from.0, (from.1 + count).min(max)))
+            Some((from.0, (from.1 + count).min(len)))
         }
         Motion::Up => Some((from.0.saturating_sub(count), from.1)),
         Motion::Down => Some(((from.0 + count).min(eng.buf.line_count() - 1), from.1)),
@@ -1653,7 +1763,14 @@ fn probe_motion(eng: &Engine, count: usize, motion: Motion) -> Option<Pos> {
             Some((target.min(eng.buf.line_count() - 1), 0))
         }
         Motion::Find { fwd, till, ch } => find_in_line(&eng.buf, from, count, fwd, till, ch),
-        Motion::FindRepeat { .. } => None,
+        // `;`/`,` as an operator target repeats the last find (df x ; …).
+        Motion::FindRepeat { reverse } => match eng.find {
+            Some((ch, fwd, till)) => {
+                let fwd = if reverse { !fwd } else { fwd };
+                find_in_line(&eng.buf, from, 1, fwd, till, ch)
+            }
+            None => None,
+        },
     }
 }
 
@@ -1684,6 +1801,15 @@ fn word_fwd(buf: &Buffer, cursor: Pos, big: bool) -> Option<Pos> {
                     return Some((nl, 0));
                 }
                 p = (nl, 0);
+                // The newline ended the previous word, so a non-whitespace
+                // char here is already the next word's start (vim: `w` from
+                // "foo|" on "foo\nbar" lands on the b, not the a).
+                if !matches!(
+                    buf.char_at(p).map(|c| char_class(c, big)),
+                    Some(CharClass::Whitespace)
+                ) {
+                    return Some(p);
+                }
                 continue;
             }
             return None;
@@ -2017,6 +2143,11 @@ fn parse(keys: &[Key]) -> Parse {
         };
     }
 
+    // `.` keeps whether a count was given (N. replaces the original count)
+    if c == '.' {
+        return Parse::Ready(Cmd::Repeat { count: count1 });
+    }
+
     // r<char> needs one more key
     if c == 'r' && i + 1 == keys.len() {
         return Parse::NeedMore;
@@ -2079,6 +2210,10 @@ fn simple_command(c: char, count: usize) -> Option<Cmd> {
         'O' => Cmd::EnterInsert {
             kind: InsertKind::OpenAbove,
         },
+        ' ' => Cmd::Move {
+            count,
+            motion: Motion::Right,
+        },
         'x' => Cmd::DeleteChars { count, fwd: true },
         'X' => Cmd::DeleteChars { count, fwd: false },
         's' => Cmd::Op {
@@ -2113,10 +2248,10 @@ fn simple_command(c: char, count: usize) -> Option<Cmd> {
             count,
             after: false,
         },
-        'u' => Cmd::Undo,
+        'u' => Cmd::Undo { count },
         'v' => Cmd::ToggleVisual { linewise: false },
         'V' => Cmd::ToggleVisual { linewise: true },
-        '.' => Cmd::Repeat { count },
+        '.' => Cmd::Repeat { count: None },
         _ => return None,
     })
 }

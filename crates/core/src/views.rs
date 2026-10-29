@@ -125,7 +125,24 @@ impl ListFilter {
             out.retain(|t| t.priority == pri);
         }
         if let Some(q) = &self.query {
-            out = search(&out, q, true);
+            // Filter in place: a --query on `list VIEW` keeps the view's
+            // own §1.3 sort order instead of search's newest-activity order.
+            let terms: Vec<String> = q.split_whitespace().map(|t| t.to_lowercase()).collect();
+            if terms.is_empty() {
+                out.clear();
+            } else {
+                out.retain(|t| {
+                    let hay = format!(
+                        "{}\n{}\n{}\n{}",
+                        t.title,
+                        t.notes,
+                        t.project.as_deref().unwrap_or(""),
+                        t.tags.join(" ")
+                    )
+                    .to_lowercase();
+                    terms.iter().all(|term| hay.contains(term))
+                });
+            }
         }
         if let Some(n) = self.limit {
             out.truncate(n);

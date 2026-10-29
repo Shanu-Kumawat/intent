@@ -187,7 +187,10 @@ pub fn unarchive(store: &Store, task_id: &str) -> Result<OpOutcome> {
 
 fn unarchive_conn(conn: &Connection, task_id: &str) -> Result<OpOutcome> {
     let before = get_task_conn(conn, task_id)?;
-    if before.status == Status::Active {
+    if before.status != Status::Archived {
+        // unarchive means archived → active (SPEC §1.1). On an active or
+        // done task it is a no-op — reopening a done task is `reopen`, and
+        // silently un-completing it here would destroy completed_at.
         return Ok(OpOutcome::unchanged(before));
     }
     let mut after = before.clone();
@@ -531,6 +534,69 @@ mod tests {
         );
         // and must NOT have fallen back to an insert
         assert_eq!(s.get_task(&t.id).unwrap().title, "x");
+    }
+
+    #[test]
+    fn empty_project_string_stays_in_inbox() {
+        // `--project ""` stores no project; SPEC §1.2 keeps a bare capture
+        // in the inbox — an empty string is not organizing metadata.
+        let s = store();
+        let out = add(
+            &s,
+            NewTask {
+                title: "t".into(),
+                project: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .task
+        .unwrap();
+        assert_eq!(out.project, None);
+        assert!(out.inbox, "empty project must not leave the inbox");
+    }
+
+    #[test]
+    fn edit_empty_project_is_a_clear_not_an_unorganize() {
+        let s = store();
+        let t = mk(&s, "t");
+        let patch = TaskPatch {
+            project: Patch::Set(String::new()),
+            ..Default::default()
+        };
+        let out = edit(&s, &t.id, &patch).unwrap().task.unwrap();
+        assert_eq!(out.project, None);
+        assert!(out.inbox, "clearing via empty string keeps the inbox flag");
+    }
+
+    #[test]
+    fn unarchive_leaves_done_tasks_alone() {
+        let s = store();
+        let t = mk(&s, "t");
+        done(&s, &t.id).unwrap();
+        let done_task = s.get_task(&t.id).unwrap();
+        assert!(done_task.completed_at.is_some());
+        let out = unarchive(&s, &t.id).unwrap();
+        assert!(out.change.is_none(), "unarchive on a done task is a no-op");
+        let after = s.get_task(&t.id).unwrap();
+        assert_eq!(after.status, Status::Done);
+        assert!(after.completed_at.is_some(), "completion record survives");
+    }
+
+    #[test]
+    fn relative_dates_reject_junk() {
+        use crate::dates::parse_date;
+        let today = crate::today();
+        assert!(
+            parse_date("+3w2d", today).is_err(),
+            "trailing junk is an error"
+        );
+        assert!(parse_date("+-3d", today).is_err(), "inner sign is an error");
+        assert!(parse_date("+3x", today).is_err());
+        // documented forms keep working
+        assert!(parse_date("+3d", today).is_ok());
+        assert!(parse_date("+3", today).is_ok());
+        assert!(parse_date("+", today).is_ok());
     }
 
     #[test]

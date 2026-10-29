@@ -791,3 +791,180 @@ fn insert_up_down_move_lines_with_desired_column() {
     feed(&mut e, "<up> <esc>");
     assert_eq!(e.cursor(), (1, 0));
 }
+
+// ---- sweep round: vim fidelity fixes (each verified against real vim) -------
+
+#[test]
+fn w_crosses_newline_onto_first_char() {
+    let (mut e, _) = engine("foo\nbar");
+    feed(&mut e, "w");
+    assert_eq!(
+        e.cursor(),
+        (1, 0),
+        "w lands on the first char of the next line"
+    );
+    let (mut e, _) = engine("one two\nthree four");
+    feed(&mut e, "2 w");
+    assert_eq!(e.cursor(), (1, 0), "2w crosses onto 'three'");
+}
+
+#[test]
+fn insert_backspace_join_puts_cursor_on_join_point() {
+    let (mut e, _) = engine("ab\ncd");
+    feed(&mut e, "j i <bs> X <esc>");
+    assert_eq!(e.text(), "abXcd");
+    assert_eq!(e.cursor(), (0, 2), "cursor on the typed char at the join");
+}
+
+#[test]
+fn s_deletes_through_end_of_line() {
+    let (mut e, _) = engine("ab");
+    feed(&mut e, "l s z <esc>");
+    assert_eq!(e.text(), "az", "s always deletes the char under the cursor");
+    let (mut e, _) = engine("abc");
+    feed(&mut e, "l 2 s Z <esc>");
+    assert_eq!(e.text(), "aZ", "2s deletes both remaining chars");
+}
+
+#[test]
+fn insert_ctrl_w_deletes_preexisting_word_back() {
+    let (mut e, _) = engine("hello world");
+    feed(&mut e, "A <c-w> <esc>");
+    assert_eq!(
+        e.text(),
+        "hello ",
+        "ctrl-w deletes the word before the cursor"
+    );
+}
+
+#[test]
+fn d_capital_edge_cases() {
+    // D on an empty line is a no-op.
+    let (mut e, _) = engine("aa\n\ncc");
+    feed(&mut e, "j D");
+    assert_eq!(e.text(), "aa\n\ncc", "D on an empty line does nothing");
+    // D at col 0 empties the line, keeps it.
+    let (mut e, _) = engine("aa\nbb");
+    feed(&mut e, "D");
+    assert_eq!(
+        e.text(),
+        "\nbb",
+        "D at col 0 leaves the line empty, not removed"
+    );
+    // 2D spans lines: the prefix joins the line after.
+    let (mut e, _) = engine("aa\nbb\ncc");
+    feed(&mut e, "2 D");
+    assert_eq!(e.text(), "cc");
+}
+
+#[test]
+fn dj_on_last_line_aborts() {
+    let (mut e, _) = engine("a\nb");
+    feed(&mut e, "j d j");
+    assert_eq!(e.text(), "a\nb", "dj at the boundary deletes nothing");
+    let (mut e, _) = engine("a\nb");
+    feed(&mut e, "d k");
+    assert_eq!(e.text(), "a\nb", "dk at the top deletes nothing");
+}
+
+#[test]
+fn find_repeat_works_as_operator_target() {
+    let (mut e, _) = engine("axbxc");
+    feed(&mut e, "d f x d ;");
+    assert_eq!(
+        e.text(),
+        "c",
+        "dfx deletes 'ax', d; deletes through the next x"
+    );
+}
+
+#[test]
+fn join_puts_cursor_on_the_space() {
+    let (mut e, _) = engine("foo\nbar");
+    feed(&mut e, "J");
+    assert_eq!(e.text(), "foo bar");
+    assert_eq!(e.cursor(), (0, 3), "cursor rests on the inserted space");
+}
+
+#[test]
+fn tilde_clamps_to_end_of_line() {
+    let (mut e, _) = engine("ab");
+    feed(&mut e, "1 0 ~");
+    assert_eq!(e.text(), "AB", "~ clamps to EOL instead of erroring");
+}
+
+#[test]
+fn insert_ctrl_u_never_crosses_the_origin_line() {
+    let (mut e, _) = engine("abcd\nefgh");
+    feed(&mut e, "j i x <up> <c-u> <esc>");
+    assert_eq!(
+        e.text(),
+        "abcd\nxefgh",
+        "ctrl-u on another line than the origin is a no-op"
+    );
+}
+
+#[test]
+fn zero_is_a_motion_then_more_commands_follow() {
+    let (mut e, _) = engine("hello\nworld");
+    feed(&mut e, "$ 0 j");
+    assert_eq!(e.cursor(), (1, 0), "0 executes, then j runs");
+}
+
+#[test]
+fn linewise_delete_cursor_on_first_non_blank() {
+    let (mut e, _) = engine("a\n  b");
+    feed(&mut e, "d d");
+    assert_eq!(e.cursor(), (0, 2), "dd lands on the 'b', not col 0");
+}
+
+#[test]
+fn count_u_undoes_count_changes() {
+    let (mut e, _) = engine("abcd");
+    feed(&mut e, "x x x x");
+    feed(&mut e, "3 u");
+    assert_eq!(e.text(), "bcd", "3u undoes three of the four deletions");
+}
+
+#[test]
+fn quote_object_works_from_closing_delimiter() {
+    let (mut e, _) = engine("\"hi\"");
+    feed(&mut e, "l l d i \"");
+    assert_eq!(
+        e.text(),
+        "\"\"",
+        "di\" from the closing quote deletes the inside"
+    );
+    let (mut e, _) = engine("(hi)");
+    feed(&mut e, "l l d i (");
+    assert_eq!(
+        e.text(),
+        "()",
+        "di( from the closing paren deletes the inside"
+    );
+}
+
+#[test]
+fn repeat_explicit_count_replaces_recorded_count() {
+    let (mut e, _) = engine("aaaaaaa");
+    feed(&mut e, "3 x");
+    assert_eq!(e.text(), "aaaa");
+    feed(&mut e, "2 .");
+    assert_eq!(e.text(), "aa", "2. replaces the original 3");
+    feed(&mut e, ".");
+    assert_eq!(e.text(), "", "bare . reuses the original 3");
+}
+
+#[test]
+fn repeat_paste_reuses_recorded_text() {
+    let (mut e, _c) = engine("foo bar baz");
+    feed(&mut e, "y i w w w p"); // yank "foo", paste after "baz"
+    assert_eq!(e.text(), "foo bar bfooaz");
+    feed(&mut e, "y i w"); // register now holds "bfooaz"
+    feed(&mut e, "$ .");
+    assert_eq!(
+        e.text(),
+        "foo bar bfooazfoo",
+        ". re-pastes the recorded 'foo', not the new register"
+    );
+}
