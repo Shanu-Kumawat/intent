@@ -1,88 +1,104 @@
-//! Pure caret/selection segment computation for editor rendering — split out
-//! of the GPUI shell so caret visibility is unit-testable without a display.
+//! Pure caret/selection computation for editor rendering — split out of the
+//! GPUI shell so caret behavior is unit-testable without a display.
+//!
+//! Rendering model (fixes column drift): each line is shaped as ONE text run
+//! and inverse plates (selection, block caret) are per-run highlight ranges.
+//! Splitting a line into separate text elements used to cost ~1px of column
+//! drift after every split point, visible as uneven spacing in the cursor's
+//! column across a multi-line buffer.
 
 use intent_vim::{Engine, Mode};
 
-/// One styled run of an editor line. `Text(txt, inverse)` renders `txt` on
-/// the inverse plate when `inverse`; `CaretBar` is the thin insert-mode caret
-/// (a narrow vertical line the shell draws between characters).
+/// What the shell should paint for one buffer line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EditSeg {
-    Text(String, bool),
-    CaretBar,
+pub struct LineRender {
+    /// Full line text to shape as a single run. Includes one virtual space
+    /// when NORMAL's block caret sits on an empty line.
+    pub text: String,
+    /// Inverse ranges (FG plate, CHROME text) as byte offsets into `text`:
+    /// the visual selection plus the block caret, merged and ordered.
+    pub inverse: Vec<(usize, usize)>,
+    /// Insert-mode caret: byte offset to draw the thin bar before
+    /// (`text.len()` = end of line). `None` outside insert mode.
+    pub insert_bar: Option<usize>,
 }
 
-/// Styled segments for one buffer line. The caret always breaks the text
-/// runs so it stays visible: a block (inverse character) in NORMAL/VISUAL, a
-/// thin vertical bar in INSERT — mid-line, at end-of-line, and on empty
-/// lines alike.
-pub fn line_segments(engine: &Engine, line_ix: usize, focused: bool) -> Vec<EditSeg> {
+pub fn line_render(engine: &Engine, line_ix: usize, focused: bool) -> LineRender {
     let chars: Vec<char> = engine.buf.lines[line_ix].clone();
     let (cur_l, cur_c) = engine.cursor();
     let on_line = focused && cur_l == line_ix;
     let insert_caret = on_line && engine.mode == Mode::Insert;
     let block_caret = on_line && engine.mode != Mode::Insert;
 
-    // Selection as a [start,end) char range on this line.
-    let (s_start, s_end) = match engine.selection() {
-        Some((a, b, lw)) if a.0 <= line_ix && b.0 >= line_ix => {
-            let s = if lw {
-                0
-            } else if a.0 == line_ix {
-                a.1
-            } else {
-                0
-            };
-            let e = if lw {
-                chars.len()
-            } else if b.0 == line_ix {
-                b.1.min(chars.len())
-            } else {
-                chars.len()
-            };
-            (s, e)
-        }
-        _ => (usize::MAX, 0),
-    };
+    // Char index → byte offset table (plus the final text length).
+    let mut byte_of: Vec<usize> = Vec::with_capacity(chars.len() + 1);
+    let mut off = 0usize;
+    for c in &chars {
+        byte_of.push(off);
+        off += c.len_utf8();
+    }
+    byte_of.push(off);
 
-    let mut segs: Vec<EditSeg> = Vec::new();
-    let mut ix = 0usize;
-    let mut bar_done = false;
-    while ix < chars.len() {
-        // The insert caret is a bar drawn *before* the character at the
-        // cursor — the character itself must still render.
-        if insert_caret && !bar_done && cur_c == ix {
-            segs.push(EditSeg::CaretBar);
-            bar_done = true;
+    let text: String = chars.iter().collect();
+
+    if chars.is_empty() {
+        if block_caret {
+            // NORMAL on an empty line: block on a virtual space.
+            return LineRender {
+                text: " ".into(),
+                inverse: vec![(0, 1)],
+                insert_bar: None,
+            };
         }
-        let in_sel = s_start <= ix && ix < s_end;
-        let inverse = in_sel || (block_caret && cur_c == ix);
-        // Run until the next visual break: selection boundary or caret. The
-        // caret must bound the run even when there is no selection, or a
-        // plain run swallows it (the mid-line caret was invisible this way).
-        // Inside a selection no caret break is needed — the run is inverse
-        // either way.
-        let mut end = if in_sel { s_end } else { s_start };
-        if !in_sel {
-            if block_caret && cur_c == ix {
-                end = ix + 1;
-            } else if cur_c > ix {
-                end = end.min(cur_c);
+        return LineRender {
+            text,
+            inverse: vec![],
+            insert_bar: insert_caret.then_some(0),
+        };
+    }
+
+    let mut inverse: Vec<(usize, usize)> = Vec::new();
+
+    // Block caret covers the char under the cursor.
+    if block_caret {
+        let c = cur_c.min(chars.len() - 1);
+        inverse.push((byte_of[c], byte_of[c] + chars[c].len_utf8()));
+    }
+
+    // Selection as a byte range on this line.
+    if let Some((a, b, lw)) = engine.selection() {
+        if a.0 <= line_ix && b.0 >= line_ix {
+            let s_char = if lw || a.0 < line_ix {
+                0
+            } else {
+                a.1.min(chars.len())
+            };
+            let e_char = if lw || b.0 > line_ix {
+                chars.len()
+            } else {
+                b.1.min(chars.len())
+            };
+            if s_char < e_char {
+                inverse.push((byte_of[s_char], byte_of[e_char]));
             }
         }
-        let len = end.min(chars.len()).saturating_sub(ix).max(1);
-        segs.push(EditSeg::Text(chars[ix..ix + len].iter().collect(), inverse));
-        ix += len;
     }
-    if insert_caret && !bar_done {
-        segs.push(EditSeg::CaretBar);
-    } else if block_caret && cur_c >= chars.len() {
-        // NORMAL on an empty line: block on a virtual space.
-        segs.push(EditSeg::Text(" ".into(), true));
-    } else if segs.is_empty() {
-        segs.push(EditSeg::Text(" ".into(), false));
+
+    inverse.sort_by_key(|(a, b)| (*a, *b));
+    // Merge touching/overlapping ranges so the shell gets disjoint plates.
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (a, b) in inverse {
+        match merged.last_mut() {
+            Some((_, eb)) if a <= *eb => *eb = (*eb).max(b),
+            _ => merged.push((a, b)),
+        }
     }
-    segs
+
+    LineRender {
+        text,
+        inverse: merged,
+        insert_bar: insert_caret.then(|| byte_of[cur_c.min(chars.len())]),
+    }
 }
 
 #[cfg(test)]
@@ -94,94 +110,91 @@ mod tests {
         Engine::new(text, single_line, Box::new(MemClipboard::new()))
     }
 
-    fn texts(segs: &[EditSeg]) -> Vec<String> {
-        segs.iter()
-            .map(|s| match s {
-                EditSeg::Text(t, inv) => {
-                    if *inv {
-                        format!("[{t}]")
-                    } else {
-                        t.clone()
-                    }
-                }
-                EditSeg::CaretBar => "|".to_string(),
-            })
-            .collect()
+    fn desc(lr: &LineRender) -> String {
+        // Render the line with `[]` around inverse ranges and `|` at the bar.
+        let mut out = String::new();
+        let mut byte = 0usize;
+        for (a, b) in &lr.inverse {
+            out.push_str(&lr.text[byte..*a]);
+            out.push('[');
+            out.push_str(&lr.text[*a..*b]);
+            out.push(']');
+            byte = *b;
+        }
+        out.push_str(&lr.text[byte..]);
+        if let Some(bar) = lr.insert_bar {
+            out.insert(bar, '|');
+        }
+        out
     }
 
     #[test]
     fn normal_caret_is_a_block_mid_line() {
         let e = engine("hello", true);
-        // cursor (0,0) in normal mode: block on 'h', then the rest.
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["[h]", "ello"]);
+        assert_eq!(desc(&line_render(&e, 0, true)), "[h]ello");
     }
 
     #[test]
     fn normal_caret_survives_without_selection_anywhere() {
-        // Regression: with no selection the plain run used to span the whole
-        // line and swallow the caret character.
         let mut e = engine("hello", true);
         e.handle(Key::new("l"));
-        e.handle(Key::new("l")); // cursor to (0,2)
+        e.handle(Key::new("l")); // cursor (0,2)
         assert_eq!(e.cursor(), (0, 2));
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["he", "[l]", "lo"]);
+        assert_eq!(desc(&line_render(&e, 0, true)), "he[l]lo");
     }
 
     #[test]
-    fn insert_caret_is_a_thin_bar_mid_line() {
+    fn insert_caret_is_a_bar_before_the_char() {
         let mut e = engine("hello", true);
         e.handle(Key::new("i"));
         e.handle(Key::new("x"));
         e.handle(Key::new("y")); // "xyhello", cursor (0,2)
         assert_eq!(e.cursor(), (0, 2));
-        // The bar sits *before* the character at the cursor; that character
-        // still renders (a regression once swallowed it).
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["xy", "|", "hello"]);
-    }
-
-    #[test]
-    fn insert_bar_never_hides_the_char_under_it() {
-        let mut e = engine("hello", true);
-        e.handle(Key::new("i")); // cursor (0,0), insert
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["|", "hello"]);
-        let mut e = engine("abc", true);
-        e.handle(Key::new("l"));
-        e.handle(Key::new("i")); // cursor (0,1), insert before 'b'
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["a", "|", "bc"]);
+        let lr = line_render(&e, 0, true);
+        assert_eq!(
+            desc(&lr),
+            "xy|hello",
+            "bar sits before the char at the cursor"
+        );
+        assert_eq!(lr.inverse, vec![], "insert mode has no inverse ranges");
     }
 
     #[test]
     fn esc_from_insert_returns_to_a_visible_block() {
         let mut e = engine("hello", true);
         e.handle(Key::new("A"));
-        e.handle(Key::new("!")); // "hello!", cursor (0,6) in insert
-        e.handle(Key::new("esc")); // clamped to (0,5)
+        e.handle(Key::new("!"));
+        e.handle(Key::new("esc"));
         assert_eq!(e.mode, Mode::Normal);
         assert_eq!(e.cursor(), (0, 5));
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["hello", "[!]"]);
+        assert_eq!(desc(&line_render(&e, 0, true)), "hello[!]");
     }
 
     #[test]
-    fn insert_caret_at_end_of_line_and_on_empty_lines() {
+    fn insert_bar_at_end_of_line_and_on_empty_lines() {
         let mut e = engine("", true);
         e.handle(Key::new("i"));
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["|"]);
+        assert_eq!(desc(&line_render(&e, 0, true)), "|");
 
         let mut e = engine("abc", true);
         e.handle(Key::new("A")); // insert at EOL
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["abc", "|"]);
+        assert_eq!(desc(&line_render(&e, 0, true)), "abc|");
     }
 
     #[test]
     fn normal_caret_on_empty_line_is_a_virtual_block() {
         let e = engine("", true);
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["[ ]"]);
+        let lr = line_render(&e, 0, true);
+        assert_eq!(lr.text, " ");
+        assert_eq!(desc(&lr), "[ ]");
     }
 
     #[test]
     fn unfocused_field_has_no_caret() {
         let e = engine("hello", true);
-        assert_eq!(texts(&line_segments(&e, 0, false)), ["hello"]);
+        let lr = line_render(&e, 0, false);
+        assert_eq!(desc(&lr), "hello");
+        assert_eq!(lr.insert_bar, None);
     }
 
     #[test]
@@ -189,7 +202,17 @@ mod tests {
         let mut e = engine("hello", true);
         e.handle(Key::shifted("v"));
         e.handle(Key::new("l"));
-        // linewise selection covers the whole line.
-        assert_eq!(texts(&line_segments(&e, 0, true)), ["[hello]"]);
+        assert_eq!(desc(&line_render(&e, 0, true)), "[hello]");
+    }
+
+    #[test]
+    fn bar_offset_is_a_byte_offset() {
+        // A multi-byte char before the caret must not corrupt the offset.
+        let mut e = engine("héllo", true);
+        e.handle(Key::new("l"));
+        e.handle(Key::new("i")); // insert before 'é'
+        let lr = line_render(&e, 0, true);
+        assert_eq!(lr.insert_bar, Some(1), "byte offset after 'h'");
+        assert_eq!(&lr.text[..1], "h");
     }
 }

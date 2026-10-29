@@ -403,34 +403,69 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
         .into_any_element()
 }
 
-/// One editor line rendered as styled segments (inverse for selection/caret).
-fn engine_line(engine: &Engine, line_ix: usize, focused: bool) -> impl IntoElement {
-    let mut line = div().flex().h(px(24.0)).items_center();
-    for seg in intent_gui::render::line_segments(engine, line_ix, focused) {
-        match seg {
-            intent_gui::render::EditSeg::Text(text, inverse) => {
-                let seg = div().child(text);
-                if inverse {
-                    line = line.child(seg.bg(FG).text_color(CHROME));
-                } else {
-                    line = line.child(seg);
-                }
-            }
-            // Insert mode: a thin vertical bar instead of a block, standing
-            // in for the character position (SPEC §4.2).
-            intent_gui::render::EditSeg::CaretBar => {
-                line = line.child(div().w(px(2.0)).h(px(18.0)).bg(FG).flex_none());
-            }
-        }
+/// One editor line: shaped as a SINGLE text run, with inverse plates
+/// (selection, block caret) as per-run highlight ranges and the insert-mode
+/// bar positioned by measuring the shaped prefix. Text elements must never
+/// be split at the caret — each split point costs ~1px of column drift,
+/// which shows up as uneven spacing down the cursor's column.
+fn engine_line(
+    engine: &Engine,
+    line_ix: usize,
+    focused: bool,
+    ts: &std::sync::Arc<gpui::WindowTextSystem>,
+) -> impl IntoElement {
+    let lr = intent_gui::render::line_render(engine, line_ix, focused);
+    let style = gpui::TextStyle {
+        color: FG.into(),
+        font_family: MONO.into(),
+        font_size: gpui::AbsoluteLength::Pixels(px(15.0)),
+        line_height: gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(px(24.0))),
+        ..Default::default()
+    };
+    let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = lr
+        .inverse
+        .iter()
+        .map(|(a, b)| {
+            (
+                *a..*b,
+                gpui::HighlightStyle {
+                    color: Some(CHROME.into()),
+                    background_color: Some(FG.into()),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    let mut line = div().relative().flex_none();
+    line = line
+        .child(gpui::StyledText::new(lr.text.clone()).with_default_highlights(&style, highlights));
+    if let Some(byte) = lr.insert_bar {
+        // The bar overlays the left edge of the caret column. Its x is the
+        // shaped width of the prefix — same font, same shaping, so it lands
+        // exactly on the column boundary (nudged 1px to straddle it).
+        let prefix = &lr.text[..byte];
+        let run = style.to_run(prefix.len());
+        let width = ts
+            .layout_line(prefix, px(15.0), std::slice::from_ref(&run), None)
+            .width;
+        line = line.child(
+            div()
+                .absolute()
+                .left(width - px(1.0))
+                .top(px(3.0))
+                .w(px(2.0))
+                .h(px(18.0))
+                .bg(FG),
+        );
     }
     line
 }
 
-fn editor_pane(state: &GuiState) -> gpui::AnyElement {
+fn editor_pane(state: &GuiState, ts: &std::sync::Arc<gpui::WindowTextSystem>) -> gpui::AnyElement {
     let Some(ed) = &state.editor else {
         return div().into_any_element();
     };
-    let field = |label: &str, engine: &Engine, focused: bool| {
+    let field = |label: &str, engine: &Engine, focused: bool, ts: &_| {
         let line_count = engine.buf.line_count();
         let mut col = div()
             .flex()
@@ -444,7 +479,7 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
         }
         let mut inner = div().flex().flex_col();
         for li in 0..line_count {
-            inner = inner.child(engine_line(engine, li, focused));
+            inner = inner.child(engine_line(engine, li, focused, ts));
         }
         col.child(
             div()
@@ -462,8 +497,8 @@ fn editor_pane(state: &GuiState) -> gpui::AnyElement {
         .flex_1()
         .map(scrollable)
         .bg(PAPER)
-        .child(field("TITLE", &ed.title, ed.focus_title))
-        .child(field("NOTES", &ed.notes, !ed.focus_title))
+        .child(field("TITLE", &ed.title, ed.focus_title, ts))
+        .child(field("NOTES", &ed.notes, !ed.focus_title, ts))
         .child(
             div()
                 .px_4()
@@ -551,7 +586,7 @@ impl Render for Shell {
             .child("nothing here — o to capture, ? for keys");
 
         let main = if state.editor.is_some() {
-            editor_pane(state).into_any_element()
+            editor_pane(state, window.text_system()).into_any_element()
         } else if rows_len == 0 {
             empty.into_any_element()
         } else {
