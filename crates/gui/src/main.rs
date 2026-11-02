@@ -40,15 +40,45 @@ const VISUAL_PLATE: gpui::Rgba = rgba_lit(0.788, 0.788, 0.788, 1.0); // #c9c9c9
 /// Danger accent — the app's single non-monochrome color, reserved for
 /// the delete-armed row. White on it keeps AA+ contrast.
 const DANGER: gpui::Rgba = rgba_lit(0.60, 0.11, 0.11, 1.0); // #991b1b
-/// Body font size (px); every surface derives from these two.
+/// Body font size (px); every surface derives from these.
 const TEXT: f32 = 16.0;
-/// Horizontal indent of the view heading (the plates run full-bleed from
-/// the window edge beneath it, like the user's mock).
-const LIST_INDENT: f32 = 24.0;
 /// Secondary text (meta columns, subtitles, footer hints).
 const SMALL: f32 = 13.0;
-const PAPER: gpui::Rgba = SURFACE;
-const GREY: gpui::Rgba = MUTED;
+/// View-heading name size / line height.
+const HEADING: f32 = 24.0;
+const HEADING_LH: f32 = 26.0;
+/// Spacing scale (4px base) — every padding, margin, and gap in the shell
+/// is one of these, so the layout rhythm is tunable in one place.
+const S1: f32 = 4.0; // hairline gaps
+const S2: f32 = 8.0; // tight
+const S3: f32 = 12.0; // default column gap
+const S4: f32 = 16.0; // standard padding
+const S6: f32 = 24.0; // section padding
+/// Component dimensions.
+const HEADER_H: f32 = 44.0;
+const BAR_H: f32 = 36.0;
+const ROW_H: f32 = 36.0;
+const SIDEBAR_W: f32 = 196.0;
+/// Sidebar keeps the pre-bump body size (user preference).
+const SIDEBAR_TEXT: f32 = 15.0;
+/// Editor line height; the caret bar derives from it.
+const LINE_H: f32 = 26.0;
+/// Task-row columns: priority mark column, mark/checkbox column, drawn box.
+const PRI_W: f32 = 31.0;
+const MARK_W: f32 = 22.0;
+const CHECKBOX: f32 = 14.0;
+/// Mono trailing-bearing compensation for the 3-glyph priority mark
+/// (!!! paints ~21px but reserves ~29px of advance): keeps the gap after
+/// it equal to the row's left padding. Coupled to TEXT and MONO.
+const PRI_TRAILING: f32 = -9.0;
+/// Insert-mode caret bar.
+const CARET_W: f32 = 2.0;
+const CARET_H: f32 = 20.0;
+/// Horizontal indent of the view heading's first letter.
+const LIST_INDENT: f32 = 28.0;
+/// Status-bar fields.
+const PENDING_MIN_W: f32 = 60.0;
+const STATUS_MAX_W: f32 = 640.0;
 const fn rgba_lit(r: f32, g: f32, b: f32, a: f32) -> gpui::Rgba {
     gpui::Rgba { r, g, b, a }
 }
@@ -172,8 +202,8 @@ fn header(state: &GuiState) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_between()
-        .px_4()
-        .h(px(44.0))
+        .px(px(S4))
+        .h(px(HEADER_H))
         .border_b_2()
         .border_color(FG)
         .bg(CHROME)
@@ -209,7 +239,7 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
     let mut col = div()
         .flex()
         .flex_col()
-        .w(px(196.0))
+        .w(px(SIDEBAR_W))
         .border_r_2()
         .border_color(FG);
     for (n, view) in items {
@@ -223,9 +253,9 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
             .id(SharedString::from(format!("sb-{n}")))
             .flex()
             .justify_between()
-            .px_4()
-            .py_2()
-            .text_size(px(15.0));
+            .px(px(S4))
+            .py(px(S2))
+            .text_size(px(SIDEBAR_TEXT));
         if active {
             row = row
                 .bg(FG)
@@ -237,12 +267,12 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
     col = col.child(div().flex_1());
     col = col.child(
         div()
-            .px_4()
-            .py_2()
+            .px(px(S4))
+            .py(px(S2))
             .border_t_2()
             .border_color(HAIRLINE)
             .text_color(MUTED)
-            .text_size(px(15.0))
+            .text_size(px(SIDEBAR_TEXT))
             .child("? keymap  :q quit"),
     );
     col
@@ -304,19 +334,19 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         .relative()
         .flex()
         .items_center()
-        .gap_3()
+        .gap(px(S3))
         .w_full()
-        .h(px(36.0))
-        .pl(px(8.0))
-        .pr(px(LIST_INDENT + 24.0))
+        .h(px(ROW_H))
+        .pl(px(S3))
+        .pr(px(S4))
         .border_b_1()
         .border_color(HAIRLINE);
     // The delete-armed row turns red — the app's single non-monochrome
     // accent, reserved for imminent destruction.
     let armed = state.delete_armed.as_deref() == Some(task.id.as_str());
     let ink = if in_visual || selected { CHROME } else { FG };
-    // Plates are inset on BOTH sides by LIST_INDENT: aligned with the
-    // heading's first letter on the left, mirrored margin on the right.
+    // Plates are full-bleed; every content column starts at LIST_INDENT,
+    // aligned under the heading's first letter.
     let plate = if armed {
         Some(DANGER)
     } else if in_visual {
@@ -330,10 +360,10 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         row = row.child(
             div()
                 .absolute()
-                .left(px(LIST_INDENT))
+                .left_0()
                 .top_0()
                 .bottom_0()
-                .right(px(LIST_INDENT))
+                .right_0()
                 .bg(color),
         );
     }
@@ -357,7 +387,7 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     }
     row.child(
         div()
-            .w(px(28.0))
+            .w(px(PRI_W))
             .font_weight(gpui::FontWeight::BOLD)
             .when(task.priority != intent_core::Priority::None, |d| {
                 d.font_weight(gpui::FontWeight::BLACK)
@@ -366,19 +396,26 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     )
     .child(
         // The pending-inbox checkbox is drawn (not the □ glyph) so its
-        // size is ours to tune; the other marks stay glyphs.
-        div().w(px(22.0)).flex().items_center().child(
-            if task.inbox && task.status == intent_core::Status::Active {
-                div()
-                    .w(px(14.0))
-                    .h(px(14.0))
-                    .border_2()
-                    .border_color(ink)
-                    .flex_none()
-            } else {
-                div().child(mark)
-            },
-        ),
+        // size is ours to tune; the other marks stay glyphs. The negative
+        // margin cancels the priority text's trailing advance so the gap
+        // after !!! matches the row's left padding.
+        div()
+            .w(px(MARK_W))
+            .ml(px(PRI_TRAILING))
+            .flex()
+            .items_center()
+            .child(
+                if task.inbox && task.status == intent_core::Status::Active {
+                    div()
+                        .w(px(CHECKBOX))
+                        .h(px(CHECKBOX))
+                        .border_2()
+                        .border_color(ink)
+                        .flex_none()
+                } else {
+                    div().child(mark)
+                },
+            ),
     )
     .child({
         // While searching, matched substrings get the inverse plate right
@@ -490,22 +527,22 @@ fn view_heading(state: &GuiState) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
-        .gap_1()
+        .gap(px(S1))
         .pl(px(LIST_INDENT))
-        .pr(px(16.0))
-        .pt_3()
-        .pb_3()
+        .pr(px(S4))
+        .pt(px(S3))
+        .pb(px(S3))
         .child(
             div()
-                .text_size(px(24.0))
-                .line_height(px(26.0))
+                .text_size(px(HEADING))
+                .line_height(px(HEADING_LH))
                 .font_weight(gpui::FontWeight::BOLD)
                 .child(name),
         )
         .child(
             div()
                 .text_size(px(SMALL))
-                .line_height(px(16.0))
+                .line_height(px(S4))
                 .text_color(MUTED)
                 .child(sub),
         )
@@ -530,9 +567,9 @@ fn status_bar(state: &GuiState) -> impl IntoElement {
     div()
         .flex()
         .items_center()
-        .gap_3()
-        .h(px(36.0))
-        .px_3()
+        .gap(px(S3))
+        .h(px(BAR_H))
+        .px(px(S3))
         .border_t_2()
         .border_color(FG)
         .bg(CHROME)
@@ -547,15 +584,15 @@ fn status_bar(state: &GuiState) -> impl IntoElement {
         )
         .child(
             div()
-                .min_w(px(60.0))
+                .min_w(px(PENDING_MIN_W))
                 .child(SharedString::from(state.pending_display())),
         )
-        .child(div().text_color(GREY).child(id))
-        .child(div().text_color(GREY).child(pos))
+        .child(div().text_color(MUTED).child(id))
+        .child(div().text_color(MUTED).child(pos))
         .child(div().flex_1())
         .child(
             div()
-                .max_w(px(640.0))
+                .max_w(px(STATUS_MAX_W))
                 .overflow_x_hidden()
                 .child(SharedString::from(state.status.clone())),
         )
@@ -578,13 +615,13 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
         .border_t_2()
         .border_color(FG)
         .bg(SURFACE)
-        .px_3()
-        .py_2()
+        .px(px(S3))
+        .py(px(S2))
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap_2()
+                .gap(px(S2))
                 .child(
                     div()
                         .font_weight(gpui::FontWeight::BOLD)
@@ -663,7 +700,7 @@ fn engine_line(
 ) -> impl IntoElement {
     let lr = intent_gui::render::line_render(engine, line_ix, focused);
     let mut style = mono_style(FG, gpui::FontWeight::NORMAL, false);
-    style.line_height = gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(px(26.0)));
+    style.line_height = gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(px(LINE_H)));
     let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = lr
         .inverse
         .iter()
@@ -694,9 +731,9 @@ fn engine_line(
             div()
                 .absolute()
                 .left(width - px(1.0))
-                .top(px(3.0))
-                .w(px(2.0))
-                .h(px(20.0))
+                .top(px((LINE_H - CARET_H) / 2.0))
+                .w(px(CARET_W))
+                .h(px(CARET_H))
                 .bg(FG),
         );
     }
@@ -712,8 +749,8 @@ fn editor_pane(state: &GuiState, ts: &std::sync::Arc<gpui::WindowTextSystem>) ->
         let mut col = div()
             .flex()
             .flex_col()
-            .p_2()
-            .m_2()
+            .p(px(S2))
+            .m(px(S2))
             .border_2()
             .border_color(if focused { FG } else { HAIRLINE });
         if focused {
@@ -738,14 +775,14 @@ fn editor_pane(state: &GuiState, ts: &std::sync::Arc<gpui::WindowTextSystem>) ->
         .flex_col()
         .flex_1()
         .map(scrollable)
-        .bg(PAPER)
+        .bg(SURFACE)
         .child(field("TITLE", &ed.title, ed.focus_title, ts))
         .child(field("NOTES", &ed.notes, !ed.focus_title, ts))
         .child(
             div()
-                .px_4()
-                .py_1()
-                .text_color(GREY)
+                .px(px(S4))
+                .py(px(S1))
+                .text_color(MUTED)
                 .text_size(px(SMALL))
                 .child(
                     "tab/ctrl-j/k fields · esc esc back to list · :q close · u/ctrl-r undo text",
@@ -758,9 +795,9 @@ fn help_overlay() -> gpui::AnyElement {
     let keys: &[&str] = &[
         "j k ↑ ↓ g g G   move        1-4 alt+1-4  view",
         "ctrl-d/ctrl-u    jump ±10    tab  cycle view",
-        "o SPC SPC c      capture     /    search",
-        "enter / i / a    edit task   /    search",
-        "n N              next/prev match",
+        "o SPC SPC c      capture     ?    keymap",
+        "enter / i / a    edit task   /    search (live)",
+        "n N              cycle matches",
         "x                complete    d    archive",
         "SPC d/u/r        defer/due/remind prompt",
         "SPC o            organize    > <  shift due ±1",
@@ -783,17 +820,17 @@ fn help_overlay() -> gpui::AnyElement {
                 .bg(SURFACE)
                 .border_2()
                 .border_color(FG)
-                .p_6()
+                .p(px(S6))
                 .flex()
                 .flex_col()
-                .gap_2()
+                .gap(px(S2))
                 .child(
                     div()
                         .font_weight(gpui::FontWeight::BLACK)
                         .child("INTENT — KEYMAP"),
                 )
                 .children(keys.iter().map(|k| div().child(*k)))
-                .child(div().text_color(GREY).child("any key closes")),
+                .child(div().text_color(MUTED).child("any key closes")),
         )
         .into_any_element()
 }
@@ -827,7 +864,7 @@ impl Render for Shell {
             .flex_1()
             .items_center()
             .justify_center()
-            .text_color(GREY)
+            .text_color(MUTED)
             .child("nothing here — o to capture, ? for keys");
 
         let main = if state.editor.is_some() {
