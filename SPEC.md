@@ -265,7 +265,7 @@ Pending state is always visible, so waiting is safe.
 | `x`                | complete (active→done) / reopen (done→active) / revive (archived→active); count applies to N tasks from cursor |
 | `d`                | archive (count ok)                                             |
 | `space D`          | unarchive                                                     |
-| `D`                | delete permanently — y/n confirmation, undoable in-session     |
+| `D`                | delete permanently — two-stroke: the first `D` arms the row (it turns red, the app's only non-monochrome accent), a second `D` on the same row deletes; `esc`, moving, or any other key disarms. Session-undoable |
 | `>` / `<`          | shift due +1/−1 day; if no due, `>` sets due = today (count ok)|
 | `+` `=` / `-`      | raise / lower priority (cycle none↔low↔medium↔high; count ok)  |
 | `y` / `Y`          | yank title / title+notes to system clipboard                   |
@@ -286,6 +286,10 @@ Pending state is always visible, so waiting is safe.
 `space` is **always** the leader, on every surface, in every mode (in the
 editor it never acts as a motion). Unknown leader keys produce a status
 message and clear the pending state — never a silent no-op.
+
+The list column carries the view's name and its task count above the rows
+(while searching: the live match count — the search spans all non-archived
+tasks, so no view is claimed as active in the sidebar).
 
 ### 4.2 Editor
 

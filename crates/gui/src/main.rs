@@ -33,6 +33,13 @@ const HAIRLINE: gpui::Rgba = rgba_lit(0.188, 0.188, 0.188, 1.0);
 const SURFACE: gpui::Rgba = rgba_lit(0.102, 0.102, 0.102, 1.0);
 /// Focused editor field — #222222, one step above SURFACE.
 const FIELD: gpui::Rgba = rgba_lit(0.133, 0.133, 0.133, 1.0);
+/// Danger accent — the app's single non-monochrome color, reserved for
+/// the delete-armed row. White on it keeps AA+ contrast.
+const DANGER: gpui::Rgba = rgba_lit(0.60, 0.11, 0.11, 1.0); // #991b1b
+/// Body font size (px); every surface derives from these two.
+const TEXT: f32 = 16.0;
+/// Secondary text (meta columns, subtitles, footer hints).
+const SMALL: f32 = 13.0;
 const PAPER: gpui::Rgba = SURFACE;
 const GREY: gpui::Rgba = MUTED;
 const fn rgba_lit(r: f32, g: f32, b: f32, a: f32) -> gpui::Rgba {
@@ -210,7 +217,8 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
             .flex()
             .justify_between()
             .px_4()
-            .py_2();
+            .py_2()
+            .text_size(px(15.0));
         if active {
             row = row
                 .bg(FG)
@@ -227,6 +235,7 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
             .border_t_2()
             .border_color(HAIRLINE)
             .text_color(MUTED)
+            .text_size(px(15.0))
             .child("? keymap  :q quit"),
     );
     col
@@ -289,11 +298,16 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         .items_center()
         .gap_3()
         .w_full()
-        .h(px(34.0))
+        .h(px(36.0))
         .px_4()
         .border_b_1()
         .border_color(HAIRLINE);
-    if inverse {
+    // The delete-armed row turns red — the app's single non-monochrome
+    // accent, reserved for imminent destruction.
+    let armed = state.delete_armed.as_deref() == Some(task.id.as_str());
+    if armed {
+        row = row.bg(DANGER).text_color(FG);
+    } else if inverse {
         row = row.bg(FG).text_color(CHROME);
     }
     row.child(
@@ -359,8 +373,10 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     })
     .child(
         div()
-            .text_size(px(12.0))
-            .text_color(if inverse {
+            .text_size(px(SMALL))
+            .text_color(if armed {
+                rgba_lit(0.93, 0.80, 0.80, 1.0) // soft red-tinted white: 5.6:1
+            } else if inverse {
                 rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 8.9:1
             } else {
                 MUTED
@@ -369,15 +385,58 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     )
     .child(
         div()
-            .text_size(px(12.0))
-            .text_color(if inverse {
-                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 8.9:1
+            .text_size(px(SMALL))
+            .text_color(if armed {
+                rgba_lit(0.93, 0.80, 0.80, 1.0)
+            } else if inverse {
+                rgba_lit(0.29, 0.29, 0.29, 1.0)
             } else {
                 MUTED
             })
             .child(task.id.clone()),
     )
     .into_any_element()
+}
+
+/// Heading above the list: the view's name and its task count (match
+/// count while searching — the search spans all non-archived tasks).
+fn view_heading(state: &GuiState) -> impl IntoElement {
+    let (name, sub) = if state.search_active() {
+        let n = state.search_match_count();
+        (
+            "Search".to_string(),
+            format!(
+                "{} match{} — esc to exit",
+                n,
+                if n == 1 { "" } else { "es" }
+            ),
+        )
+    } else {
+        let name = {
+            let raw = state.view.to_string();
+            let mut cs = raw.chars();
+            match cs.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + cs.as_str(),
+                None => raw,
+            }
+        };
+        let n = state.rows.len();
+        (name, format!("{} task{}", n, if n == 1 { "" } else { "s" }))
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap_0()
+        .px_4()
+        .pt_3()
+        .pb_1()
+        .child(
+            div()
+                .text_size(px(22.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .child(name),
+        )
+        .child(div().text_size(px(SMALL)).text_color(MUTED).child(sub))
 }
 
 fn status_bar(state: &GuiState) -> impl IntoElement {
@@ -472,7 +531,7 @@ fn mono_style(color: gpui::Rgba, weight: gpui::FontWeight, strikethrough: bool) 
     gpui::TextStyle {
         color: color.into(),
         font_family: MONO.into(),
-        font_size: gpui::AbsoluteLength::Pixels(px(15.0)),
+        font_size: gpui::AbsoluteLength::Pixels(px(TEXT)),
         font_weight: weight,
         strikethrough: strikethrough.then(Default::default),
         ..Default::default()
@@ -532,7 +591,7 @@ fn engine_line(
 ) -> impl IntoElement {
     let lr = intent_gui::render::line_render(engine, line_ix, focused);
     let mut style = mono_style(FG, gpui::FontWeight::NORMAL, false);
-    style.line_height = gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(px(24.0)));
+    style.line_height = gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(px(26.0)));
     let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = lr
         .inverse
         .iter()
@@ -557,7 +616,7 @@ fn engine_line(
         let prefix = &lr.text[..byte];
         let run = style.to_run(prefix.len());
         let width = ts
-            .layout_line(prefix, px(15.0), std::slice::from_ref(&run), None)
+            .layout_line(prefix, px(TEXT), std::slice::from_ref(&run), None)
             .width;
         line = line.child(
             div()
@@ -565,7 +624,7 @@ fn engine_line(
                 .left(width - px(1.0))
                 .top(px(3.0))
                 .w(px(2.0))
-                .h(px(18.0))
+                .h(px(20.0))
                 .bg(FG),
         );
     }
@@ -595,7 +654,7 @@ fn editor_pane(state: &GuiState, ts: &std::sync::Arc<gpui::WindowTextSystem>) ->
         col.child(
             div()
                 .font_weight(gpui::FontWeight::BOLD)
-                .text_size(px(12.0))
+                .text_size(px(SMALL))
                 .text_color(if focused { FG } else { MUTED })
                 .child(format!("{label}  {}", engine.mode_name())),
         )
@@ -615,7 +674,7 @@ fn editor_pane(state: &GuiState, ts: &std::sync::Arc<gpui::WindowTextSystem>) ->
                 .px_4()
                 .py_1()
                 .text_color(GREY)
-                .text_size(px(12.0))
+                .text_size(px(SMALL))
                 .child(
                     "tab/ctrl-j/k fields · esc esc back to list · :q close · u/ctrl-r undo text",
                 ),
@@ -636,7 +695,7 @@ fn help_overlay() -> gpui::AnyElement {
         "SPC D            unarchive   SPC p  paste system clipboard",
         "+ - =            priority    .    repeat",
         "y Y              yank        V    visual mode",
-        "D                delete      u ctrl-r undo/redo",
+        "D D              delete (2nd confirms)   u ctrl-r undo/redo",
         ":                commands    esc  cancel",
     ];
     div()
@@ -701,10 +760,21 @@ impl Render for Shell {
 
         let main = if state.editor.is_some() {
             editor_pane(state, window.text_system()).into_any_element()
-        } else if rows_len == 0 {
-            empty.into_any_element()
         } else {
-            list.into_any_element()
+            // Heading above the list (and the empty state); the editor
+            // takes the whole column.
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .child(view_heading(state))
+                .child(if rows_len == 0 {
+                    empty.into_any_element()
+                } else {
+                    list.into_any_element()
+                })
+                .into_any_element()
         };
 
         div()
@@ -727,7 +797,7 @@ impl Render for Shell {
             .bg(BG)
             .text_color(FG)
             .font_family(MONO)
-            .text_size(px(15.0))
+            .text_size(px(TEXT))
             .child(header(state))
             .child(
                 div()

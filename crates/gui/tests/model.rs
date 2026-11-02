@@ -258,23 +258,62 @@ fn d_archives_and_space_d_unarchives() {
 }
 
 #[test]
-fn capital_d_delete_requires_confirmation_and_is_undoable() {
+fn capital_d_delete_is_two_stroke_and_undoable() {
+    // First D arms the row (red); a second D on the same row deletes.
     let mut f = fx();
     let ids = seed(&mut f, &["precious"]);
     feed(&mut f, "D");
-    assert!(f.state.prompt.is_some(), "D opens confirmation");
-    feed(&mut f, "n"); // any non-y key cancels immediately
-    assert!(f.state.prompt.is_none());
-    assert!(f.state.store.get_task(&ids[0]).is_ok(), "n keeps the task");
+    assert!(f.state.prompt.is_none(), "no y/N prompt anymore");
+    assert_eq!(
+        f.state.delete_armed.as_deref(),
+        Some(ids[0].as_str()),
+        "first D arms the row"
+    );
+    assert!(
+        f.state.status.contains("press D again"),
+        "status explains the armed state"
+    );
 
-    feed(&mut f, "D");
-    feed(&mut f, "y"); // single keypress confirms
+    feed(&mut f, "j"); // any other key disarms
+    assert_eq!(f.state.delete_armed, None, "moving disarms");
+    feed(&mut f, "D"); // re-arm on this row
+    feed(&mut f, "D"); // second D on the same row deletes
     assert!(f.state.store.get_task(&ids[0]).is_err());
     feed(&mut f, "u");
     assert!(
         f.state.store.get_task(&ids[0]).is_ok(),
         "delete is session-undoable"
     );
+}
+
+#[test]
+fn capital_d_esc_disarms_without_deleting() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["precious"]);
+    feed(&mut f, "D");
+    assert_eq!(f.state.delete_armed.as_deref(), Some(ids[0].as_str()));
+    feed(&mut f, "<esc>");
+    assert_eq!(f.state.delete_armed, None, "esc disarms");
+    assert!(f.state.store.get_task(&ids[0]).is_ok());
+    feed(&mut f, "D D"); // armed flow still works afterwards
+    assert!(f.state.store.get_task(&ids[0]).is_err());
+}
+
+#[test]
+fn delete_command_still_uses_the_y_n_prompt() {
+    // `:delete` keeps the explicit confirmation prompt; only `D` is two-stroke.
+    let mut f = fx();
+    let ids = seed(&mut f, &["precious"]);
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "delete");
+    feed(&mut f, "<cr>");
+    assert!(f.state.prompt.is_some(), "y/N prompt");
+    assert_eq!(
+        f.state.prompt.as_ref().unwrap().kind,
+        intent_gui::model::PromptKind::ConfirmDelete
+    );
+    feed(&mut f, "y");
+    assert!(f.state.store.get_task(&ids[0]).is_err());
 }
 
 // ---- dates via leader ------------------------------------------------------------
@@ -954,25 +993,27 @@ fn repeat_explicit_count_replaces_original() {
 }
 
 #[test]
-fn delete_confirmation_y_n_esc_and_stray_keys() {
+fn delete_two_stroke_stray_keys_and_switch_disarm() {
     let mut f = fx();
-    let ids = seed(&mut f, &["precious"]);
-    // stray keys are ignored — prompt stays open
+    seed(&mut f, &["precious", "other"]);
     feed(&mut f, "D");
-    feed(&mut f, "z");
-    assert!(f.state.prompt.is_some(), "stray key ignored");
-    feed(&mut f, "n");
-    assert!(f.state.prompt.is_none());
-    assert!(f.state.store.get_task(&ids[0]).is_ok());
+    feed(&mut f, "z"); // stray key disarms, nothing deleted
+    assert_eq!(f.state.delete_armed, None);
+    assert_eq!(
+        f.state.store.all_tasks().unwrap().len(),
+        2,
+        "stray key deleted nothing"
+    );
 
-    feed(&mut f, "D");
-    feed(&mut f, "<esc>");
-    assert!(f.state.prompt.is_none());
-    assert!(f.state.store.get_task(&ids[0]).is_ok());
+    feed(&mut f, "D D");
+    let after = f.state.store.all_tasks().unwrap();
+    assert_eq!(after.len(), 1, "second D deletes");
 
+    // switching views disarms too
+    feed(&mut f, "u"); // restore
     feed(&mut f, "D");
-    feed(&mut f, "y");
-    assert!(f.state.store.get_task(&ids[0]).is_err(), "y confirms");
+    feed(&mut f, "2");
+    assert_eq!(f.state.delete_armed, None, "view switch disarms");
 }
 
 #[test]

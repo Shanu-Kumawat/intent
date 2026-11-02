@@ -135,6 +135,9 @@ pub struct GuiState {
     /// every refresh (vim-style search: the list stays whole, the cursor
     /// jumps between matches).
     search_matches: Vec<usize>,
+    /// Two-stroke delete: task id armed by the first `D` (row renders red);
+    /// a second `D` on the same row deletes, anything else disarms.
+    pub delete_armed: Option<String>,
     pub view_counts: BTreeMap<TaskView, usize>,
     cursors: BTreeMap<TaskView, usize>,
     follow_id: Option<String>,
@@ -169,6 +172,7 @@ impl GuiState {
             visual_anchor: None,
             search_query: None,
             search_matches: Vec::new(),
+            delete_armed: None,
             view_counts: BTreeMap::new(),
             cursors: BTreeMap::new(),
             follow_id: None,
@@ -254,6 +258,11 @@ impl GuiState {
     /// Whether a vim-style search is active (non-matching rows render dim).
     pub fn search_active(&self) -> bool {
         self.search_query.is_some()
+    }
+
+    /// Number of live search matches (0 when not searching).
+    pub fn search_match_count(&self) -> usize {
+        self.search_matches.len()
     }
 
     /// Lowercased search terms for substring highlighting.
@@ -998,6 +1007,7 @@ impl GuiState {
         if self.view != view {
             self.cursor = self.cursors.get(&view).copied().unwrap_or(0);
         }
+        self.delete_armed = None;
         self.view = view;
         self.search_query = None;
         self.visual_anchor = None;
@@ -1039,6 +1049,7 @@ impl GuiState {
 
     fn handle_list_key(&mut self, key: Key) {
         if key.is_esc() {
+            self.delete_armed = None;
             if !self.pending.is_empty() {
                 self.pending.clear();
                 self.set_status("");
@@ -1079,6 +1090,10 @@ impl GuiState {
 
     /// One key in list-normal mode, including pending counts, leader, and `g`.
     fn handle_list_pending(&mut self, key: Key) {
+        // Any key other than D disarms a delete-armed row.
+        if self.delete_armed.is_some() && key.chr() != Some('D') {
+            self.delete_armed = None;
+        }
         // Leader continuation (space was pressed earlier). A count before
         // the space makes it NOT a leader sequence (`5 SPC d` must not
         // fire capture).
@@ -1211,10 +1226,18 @@ impl GuiState {
             'x' => self.complete_range(count),
             'd' => self.archive_range(count),
             'D' => {
-                if let Some(id) = self.cursor_task().map(|t| t.id.clone()) {
-                    self.open_prompt(PromptKind::ConfirmDelete, Some(id));
-                } else {
-                    self.set_status("no task under cursor");
+                // Two-stroke delete: first D arms the row (red), second D
+                // on the same row deletes. Session-undoable as ever.
+                match self.cursor_task().map(|t| t.id.clone()) {
+                    None => self.set_status("no task under cursor"),
+                    Some(id) if self.delete_armed.as_deref() == Some(id.as_str()) => {
+                        self.delete_armed = None;
+                        self.delete_task(&id);
+                    }
+                    Some(id) => {
+                        self.delete_armed = Some(id);
+                        self.set_status("press D again to delete permanently (esc cancels)");
+                    }
                 }
             }
             '>' => self.shift_due(1, count),
