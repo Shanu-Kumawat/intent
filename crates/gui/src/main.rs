@@ -33,6 +33,10 @@ const HAIRLINE: gpui::Rgba = rgba_lit(0.188, 0.188, 0.188, 1.0);
 const SURFACE: gpui::Rgba = rgba_lit(0.102, 0.102, 0.102, 1.0);
 /// Focused editor field — #222222, one step above SURFACE.
 const FIELD: gpui::Rgba = rgba_lit(0.133, 0.133, 0.133, 1.0);
+/// Visual-selection plate: the inverse language at reduced intensity —
+/// clearly a marked row, clearly softer than NORMAL's pure-white focus.
+/// Dark text on it keeps AA+.
+const VISUAL_PLATE: gpui::Rgba = rgba_lit(0.788, 0.788, 0.788, 1.0); // #c9c9c9
 /// Danger accent — the app's single non-monochrome color, reserved for
 /// the delete-armed row. White on it keeps AA+ contrast.
 const DANGER: gpui::Rgba = rgba_lit(0.60, 0.11, 0.11, 1.0); // #991b1b
@@ -307,7 +311,22 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     let armed = state.delete_armed.as_deref() == Some(task.id.as_str());
     if armed {
         row = row.bg(DANGER).text_color(FG);
-    } else if inverse {
+    } else if in_visual {
+        // Soft inverse for the whole selection; the cursor row inside it
+        // gets a thin dark left edge so extending with j/k stays oriented.
+        row = row.bg(VISUAL_PLATE).text_color(CHROME);
+        if selected {
+            row = row.relative().child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(2.0))
+                    .bg(CHROME),
+            );
+        }
+    } else if selected {
         row = row.bg(FG).text_color(CHROME);
     }
     row.child(
@@ -377,7 +396,7 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
             .text_color(if armed {
                 rgba_lit(0.93, 0.80, 0.80, 1.0) // soft red-tinted white: 5.6:1
             } else if inverse {
-                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the white plate: 8.9:1
+                rgba_lit(0.29, 0.29, 0.29, 1.0) // on the light plates: 5.4:1+
             } else {
                 MUTED
             })
@@ -432,7 +451,7 @@ fn view_heading(state: &GuiState) -> impl IntoElement {
         .pb_1()
         .child(
             div()
-                .text_size(px(22.0))
+                .text_size(px(24.0))
                 .font_weight(gpui::FontWeight::BOLD)
                 .child(name),
         )
