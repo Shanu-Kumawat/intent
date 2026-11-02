@@ -25,10 +25,6 @@ impl Mode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineEvent {
     None,
-    /// j at the bottom boundary (or any j in a single-line buffer)
-    NextField,
-    /// k at the top boundary (or any k in a single-line buffer)
-    PrevField,
     /// The buffer text changed (host may write through)
     TextChanged,
 }
@@ -832,7 +828,7 @@ impl Engine {
     // ---- motions ----------------------------------------------------------------------
 
     fn do_motion(&mut self, count: usize, motion: Motion) -> EngineEvent {
-        let mut ev = EngineEvent::None;
+        let ev = EngineEvent::None;
         match motion {
             Motion::Left => {
                 self.cursor.1 = self.cursor.1.saturating_sub(count);
@@ -843,25 +839,15 @@ impl Engine {
                 self.sync_desired();
             }
             Motion::Up | Motion::Down => {
-                if self.single_line {
-                    ev = if motion == Motion::Down {
-                        EngineEvent::NextField
-                    } else {
-                        EngineEvent::PrevField
-                    };
-                } else if motion == Motion::Down {
-                    if self.cursor.0 == self.buf.line_count() - 1 {
-                        ev = EngineEvent::NextField;
-                    } else {
-                        self.cursor.0 = (self.cursor.0 + count).min(self.buf.line_count() - 1);
-                        self.apply_desired();
-                    }
-                } else if self.cursor.0 == 0 {
-                    ev = EngineEvent::PrevField;
+                // Vim: j/k at a buffer edge stay put. Field switching is
+                // explicit (tab / ctrl-j / ctrl-k), never a motion side
+                // effect — the boundary teleport surprised users.
+                if motion == Motion::Down {
+                    self.cursor.0 = (self.cursor.0 + count).min(self.buf.line_count() - 1);
                 } else {
                     self.cursor.0 = self.cursor.0.saturating_sub(count);
-                    self.apply_desired();
                 }
+                self.apply_desired();
             }
             Motion::LineCol0 => {
                 self.cursor.1 = 0;

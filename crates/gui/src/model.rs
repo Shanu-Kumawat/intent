@@ -131,6 +131,10 @@ pub struct GuiState {
     pub cursor: usize,
     pub visual_anchor: Option<usize>,
     pub search_query: Option<String>,
+    /// Row indices of search matches within `rows`, ascending — computed on
+    /// every refresh (vim-style search: the list stays whole, the cursor
+    /// jumps between matches).
+    search_matches: Vec<usize>,
     pub view_counts: BTreeMap<TaskView, usize>,
     cursors: BTreeMap<TaskView, usize>,
     follow_id: Option<String>,
@@ -164,6 +168,7 @@ impl GuiState {
             cursor: 0,
             visual_anchor: None,
             search_query: None,
+            search_matches: Vec::new(),
             view_counts: BTreeMap::new(),
             cursors: BTreeMap::new(),
             follow_id: None,
@@ -193,8 +198,10 @@ impl GuiState {
             Err(_) => return,
         };
         self.view_counts = counts(&all, self.today).into_iter().collect();
+        // Vim-style search: the list keeps showing tasks (the whole
+        // non-archived set), the cursor jumps between matching rows.
         let rows = match &self.search_query {
-            Some(q) => search(&all, q, false),
+            Some(_) => for_view(&all, TaskView::All, self.today),
             None => for_view(&all, self.view, self.today),
         };
         // Cursor follows the tracked task id, else clamps.
@@ -209,6 +216,18 @@ impl GuiState {
         }
         self.cursors.insert(self.view, self.cursor);
         self.rows = rows;
+        self.search_matches = match &self.search_query {
+            Some(q) => {
+                let hits: std::collections::HashSet<String> = search(&self.rows, q, true)
+                    .into_iter()
+                    .map(|t| t.id)
+                    .collect();
+                (0..self.rows.len())
+                    .filter(|i| hits.contains(&self.rows[*i].id))
+                    .collect()
+            }
+            None => vec![],
+        };
         if self.visual_anchor.is_some() {
             self.visual_anchor = None; // mutations invalidate selections
         }
@@ -230,6 +249,26 @@ impl GuiState {
             }
             _ => false,
         }
+    }
+
+    /// Whether a vim-style search is active (non-matching rows render dim).
+    pub fn search_active(&self) -> bool {
+        self.search_query.is_some()
+    }
+
+    /// Lowercased search terms for substring highlighting.
+    pub fn search_terms(&self) -> Vec<String> {
+        self.search_query
+            .as_deref()
+            .unwrap_or("")
+            .split_whitespace()
+            .map(|t| t.to_lowercase())
+            .collect()
+    }
+
+    /// Is row `ix` a search match? Only meaningful while searching.
+    pub fn search_match(&self, ix: usize) -> bool {
+        self.search_matches.binary_search(&ix).is_ok()
     }
 
     pub fn cursor_task(&self) -> Option<&Task> {
@@ -296,7 +335,15 @@ impl GuiState {
         }
         let prompt = self.prompt.as_mut().expect("prompt");
         if key.is_esc() || (key.ctrl && key.key == "c") {
+            let was_search = self.prompt.as_ref().map(|p| p.kind) == Some(PromptKind::Search);
             self.prompt = None;
+            if was_search {
+                // Cancel the live search: back to the pre-search view/cursor.
+                self.search_query = None;
+                self.search_matches.clear();
+                self.follow_id = self.pre_search_task.take();
+                self.refresh();
+            }
             self.set_status("");
             return;
         }
@@ -307,6 +354,7 @@ impl GuiState {
         }
         if key.is_backspace() {
             prompt.input.pop();
+            self.live_search();
             return;
         }
         if key.ctrl && key.key == "w" {
@@ -317,20 +365,56 @@ impl GuiState {
             } else {
                 prompt.input.clear();
             }
+            self.live_search();
             return;
         }
         if key.ctrl && key.key == "u" {
             prompt.input.clear();
+            self.live_search();
             return;
         }
         if key.ctrl && key.key == "v" {
             if let Some(text) = self.clipboard.read() {
                 prompt.input.push_str(&text.replace('\n', " "));
             }
+            self.live_search();
             return;
         }
         if let Some(c) = keys::plain_char(&key) {
             prompt.input.push(c);
+            self.live_search();
+        }
+    }
+
+    /// Vim-style incremental search: while the `/` prompt is open every
+    /// input mutation re-runs the query — the list updates and the cursor
+    /// jumps to the first match as the user types.
+    fn live_search(&mut self) {
+        if self.prompt.as_ref().map(|p| p.kind) != Some(PromptKind::Search) {
+            return;
+        }
+        let q = self.prompt.as_ref().unwrap().input.trim().to_string();
+        self.search_query = if q.is_empty() { None } else { Some(q.clone()) };
+        self.refresh();
+        match &self.search_query {
+            Some(q) => {
+                // Highlights update live; the cursor stays where the user
+                // left it. Jumping is vim's job on <enter> / n / N.
+                if self.search_matches.is_empty() {
+                    self.set_status(format!("search: {q} — no matches"));
+                } else {
+                    self.set_status(format!(
+                        "search: {q} — {} match{}",
+                        self.search_matches.len(),
+                        if self.search_matches.len() == 1 {
+                            ""
+                        } else {
+                            "es"
+                        }
+                    ));
+                }
+            }
+            None => self.set_status(""),
         }
     }
 
@@ -442,12 +526,35 @@ impl GuiState {
                     self.search_query = None;
                 } else {
                     self.search_query = Some(q.clone());
-                    self.cursor = 0;
-                    self.set_status(format!("search: {q}"));
                 }
                 self.refresh();
                 if let Some(c) = remembered {
                     self.cursors.insert(self.view, c);
+                }
+                if let Some(q) = &self.search_query {
+                    if self.search_matches.is_empty() {
+                        self.set_status(format!("search: {q} — no matches"));
+                    } else {
+                        // Vim: <CR> moves to the next match from the cursor,
+                        // wrapping at the end.
+                        let next = self
+                            .search_matches
+                            .iter()
+                            .find(|&&i| i >= self.cursor)
+                            .copied()
+                            .unwrap_or(self.search_matches[0]);
+                        self.cursor = next;
+                        let ix = self
+                            .search_matches
+                            .iter()
+                            .position(|&i| i == self.cursor)
+                            .unwrap_or(0);
+                        self.set_status(format!(
+                            "search: {q} — match {}/{} (n/N cycle, esc clears)",
+                            ix + 1,
+                            self.search_matches.len()
+                        ));
+                    }
                 }
             }
             PromptKind::Command => {
@@ -743,6 +850,7 @@ impl GuiState {
         if ed.focus_title == to_title {
             return;
         }
+        let mode = ed.focused().mode;
         let (l, c) = ed.focused().cursor();
         let target = if to_title {
             &mut ed.title
@@ -752,6 +860,11 @@ impl GuiState {
         let line = l.min(target.buf.line_count() - 1);
         let col = if carry_col { c } else { 0 };
         target.set_cursor((line, col));
+        // Carry the source mode: ctrl+j/k switch fields mid-insert without
+        // dropping out of insert (tab switches in NORMAL as before).
+        if mode == intent_vim::Mode::Insert && target.mode != intent_vim::Mode::Insert {
+            target.handle(Key::new("i"));
+        }
         ed.focus_title = to_title;
     }
 
@@ -777,6 +890,23 @@ impl GuiState {
             .as_ref()
             .map(|e| !e.focused().pending_display().is_empty())
             .unwrap_or(false);
+
+        // ctrl+j / ctrl+k switch fields explicitly, in NORMAL *and* INSERT —
+        // the only way to change fields without leaving insert (tab types
+        // spaces there).
+        if key.ctrl && !engine_pending {
+            match key.key.as_str() {
+                "j" => {
+                    self.switch_editor_field(false, true);
+                    return;
+                }
+                "k" => {
+                    self.switch_editor_field(true, true);
+                    return;
+                }
+                _ => {}
+            }
+        }
 
         // Tab advances fields in normal/visual; in insert it types spaces.
         // With a sequence pending (either layer) it routes through the
@@ -827,8 +957,6 @@ impl GuiState {
             None => return,
         };
         match event {
-            EngineEvent::NextField => self.switch_editor_field(false, true),
-            EngineEvent::PrevField => self.switch_editor_field(true, true),
             EngineEvent::TextChanged => self.write_editor_through(&task_id),
             EngineEvent::None => {}
         }
@@ -919,6 +1047,7 @@ impl GuiState {
                 self.set_status("");
             } else if self.search_query.is_some() {
                 self.search_query = None;
+                self.search_matches.clear();
                 // Back to the task that was under the cursor before the
                 // search (SPEC §2: by id, not by row index).
                 self.follow_id = self.pre_search_task.take();
@@ -1094,6 +1223,43 @@ impl GuiState {
             '-' => self.bump_priority(-1, count),
             'y' => self.yank_task(false),
             'Y' => self.yank_task(true),
+            'n' | 'N' if self.search_query.is_some() => {
+                // Cycle matches from the cursor position (wrap), like vim's
+                // n/N from wherever the cursor happens to be.
+                let n = self.search_matches.len();
+                if n == 0 {
+                    self.set_status("no matches");
+                } else if c == 'n' {
+                    let next = self
+                        .search_matches
+                        .iter()
+                        .find(|&&i| i > self.cursor)
+                        .copied()
+                        .unwrap_or(self.search_matches[0]);
+                    self.cursor = next;
+                    let ix = self
+                        .search_matches
+                        .iter()
+                        .position(|&i| i == next)
+                        .unwrap_or(0);
+                    self.set_status(format!("match {}/{}", ix + 1, n));
+                } else {
+                    let prev = self
+                        .search_matches
+                        .iter()
+                        .rev()
+                        .find(|&&i| i < self.cursor)
+                        .copied()
+                        .unwrap_or(self.search_matches[n - 1]);
+                    self.cursor = prev;
+                    let ix = self
+                        .search_matches
+                        .iter()
+                        .position(|&i| i == prev)
+                        .unwrap_or(0);
+                    self.set_status(format!("match {}/{}", ix + 1, n));
+                }
+            }
             'V' => {
                 if !self.rows.is_empty() {
                     self.visual_anchor = Some(self.cursor);

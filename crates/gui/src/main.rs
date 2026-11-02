@@ -94,6 +94,27 @@ impl Shell {
     fn dispatch_key(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let view_before = (self.state.cursor, self.state.rows.len());
         let ks = &event.keystroke;
+        // alt+1-4 switch views (alias of the bare 1-4, same habit as
+        // workspaces/tabs elsewhere).
+        if ks.modifiers.alt && !ks.modifiers.control && !ks.modifiers.shift {
+            let view = match ks.key.as_str() {
+                "1" => Some(intent_core::TaskView::Inbox),
+                "2" => Some(intent_core::TaskView::Today),
+                "3" => Some(intent_core::TaskView::Upcoming),
+                "4" => Some(intent_core::TaskView::Completed),
+                _ => None,
+            };
+            if let Some(v) = view {
+                self.clip.snapshot_read(None);
+                self.state.switch_view(v);
+                if self.state.editor.is_none() {
+                    self.list_scroll
+                        .scroll_to_item(self.state.cursor, ScrollStrategy::Center);
+                }
+                cx.notify();
+                return;
+            }
+        }
         if ks.modifiers.alt || ks.modifiers.platform || ks.modifiers.function {
             return;
         }
@@ -178,7 +199,10 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
         .border_r_2()
         .border_color(FG);
     for (n, view) in items {
-        let active = state.view == view;
+        // While a search is active no view claims focus: the search spans
+        // all non-archived tasks, and pretending you're in TODAY while
+        // Inbox rows show would contradict the sidebar's count.
+        let active = state.view == view && !state.search_active();
         let count = state.view_counts.get(&view).copied().unwrap_or(0);
         let label = format!("{n} {}", view.to_string().to_uppercase());
         let mut row = div()
@@ -237,6 +261,8 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     } else {
         task.title.clone()
     };
+    // Vim-style search: non-matching rows fade so matches stand out.
+    let dimmed = state.search_active() && !state.search_match(ix);
 
     let mut meta = Vec::new();
     if let Some(d) = task.due {
@@ -280,19 +306,57 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
             .child(priority_mark(task.priority)),
     )
     .child(div().w(px(20.0)).child(mark))
-    .child(
-        div()
-            .flex_1()
-            .font_weight(if task.status == intent_core::Status::Done {
-                gpui::FontWeight::THIN
-            } else {
-                gpui::FontWeight::NORMAL
-            })
-            .when(task.status == intent_core::Status::Done, |d| {
-                d.line_through()
-            })
-            .child(title),
-    )
+    .child({
+        // While searching, matched substrings get the inverse plate right
+        // in the title (neovim-style hl-search). Rows already on the
+        // inverse plate skip it — white on white is invisible.
+        let terms = state.search_terms();
+        let ranges = if terms.is_empty() || inverse {
+            vec![]
+        } else {
+            match_ranges(&title, &terms)
+        };
+        if ranges.is_empty() {
+            div()
+                .flex_1()
+                .font_weight(if task.status == intent_core::Status::Done {
+                    gpui::FontWeight::THIN
+                } else {
+                    gpui::FontWeight::NORMAL
+                })
+                .when(task.status == intent_core::Status::Done, |d| {
+                    d.line_through()
+                })
+                .when(dimmed, |d| d.text_color(MUTED))
+                .child(title)
+        } else {
+            let base = mono_style(
+                if dimmed { MUTED } else { FG },
+                if task.status == intent_core::Status::Done {
+                    gpui::FontWeight::THIN
+                } else {
+                    gpui::FontWeight::NORMAL
+                },
+                task.status == intent_core::Status::Done,
+            );
+            let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = ranges
+                .iter()
+                .map(|(a, b)| {
+                    (
+                        *a..*b,
+                        gpui::HighlightStyle {
+                            color: Some(CHROME.into()),
+                            background_color: Some(FG.into()),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
+            div()
+                .flex_1()
+                .child(gpui::StyledText::new(title).with_default_highlights(&base, highlights))
+        }
+    })
     .child(
         div()
             .text_size(px(12.0))
@@ -403,6 +467,58 @@ fn prompt_bar(state: &GuiState) -> gpui::AnyElement {
         .into_any_element()
 }
 
+/// Base text style for a shaped text run in the shell's mono face.
+fn mono_style(color: gpui::Rgba, weight: gpui::FontWeight, strikethrough: bool) -> gpui::TextStyle {
+    gpui::TextStyle {
+        color: color.into(),
+        font_family: MONO.into(),
+        font_size: gpui::AbsoluteLength::Pixels(px(15.0)),
+        font_weight: weight,
+        strikethrough: strikethrough.then(Default::default),
+        ..Default::default()
+    }
+}
+
+/// Byte ranges of `terms` inside `title`, case-insensitively (for search
+/// highlighting). Skips titles where lowercasing changes the char count
+/// (byte offsets would no longer line up).
+fn match_ranges(title: &str, terms: &[String]) -> Vec<(usize, usize)> {
+    let lower = title.to_lowercase();
+    let orig_chars: Vec<char> = title.chars().collect();
+    if lower.chars().count() != orig_chars.len() {
+        return vec![];
+    }
+    let hay: Vec<char> = lower.chars().collect();
+    let mut byte_of: Vec<usize> = Vec::with_capacity(hay.len() + 1);
+    let mut off = 0usize;
+    for c in &orig_chars {
+        byte_of.push(off);
+        off += c.len_utf8();
+    }
+    byte_of.push(off);
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for term in terms {
+        let t: Vec<char> = term.chars().collect();
+        if t.is_empty() {
+            continue;
+        }
+        for i in 0..hay.len().saturating_sub(t.len() - 1) {
+            if hay[i..i + t.len()] == t[..] {
+                ranges.push((byte_of[i], byte_of[i + t.len()]));
+            }
+        }
+    }
+    ranges.sort_by_key(|(a, b)| (*a, *b));
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (a, b) in ranges {
+        match merged.last_mut() {
+            Some((_, eb)) if a <= *eb => *eb = (*eb).max(b),
+            _ => merged.push((a, b)),
+        }
+    }
+    merged
+}
+
 /// One editor line: shaped as a SINGLE text run, with inverse plates
 /// (selection, block caret) as per-run highlight ranges and the insert-mode
 /// bar positioned by measuring the shaped prefix. Text elements must never
@@ -415,13 +531,8 @@ fn engine_line(
     ts: &std::sync::Arc<gpui::WindowTextSystem>,
 ) -> impl IntoElement {
     let lr = intent_gui::render::line_render(engine, line_ix, focused);
-    let style = gpui::TextStyle {
-        color: FG.into(),
-        font_family: MONO.into(),
-        font_size: gpui::AbsoluteLength::Pixels(px(15.0)),
-        line_height: gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(px(24.0))),
-        ..Default::default()
-    };
+    let mut style = mono_style(FG, gpui::FontWeight::NORMAL, false);
+    style.line_height = gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(px(24.0)));
     let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = lr
         .inverse
         .iter()
@@ -505,17 +616,20 @@ fn editor_pane(state: &GuiState, ts: &std::sync::Arc<gpui::WindowTextSystem>) ->
                 .py_1()
                 .text_color(GREY)
                 .text_size(px(12.0))
-                .child("tab fields · esc esc back to list · :q close · u/ctrl-r undo text"),
+                .child(
+                    "tab/ctrl-j/k fields · esc esc back to list · :q close · u/ctrl-r undo text",
+                ),
         )
         .into_any_element()
 }
 
 fn help_overlay() -> gpui::AnyElement {
     let keys: &[&str] = &[
-        "j k ↑ ↓ g g G   move        1-4  switch view",
+        "j k ↑ ↓ g g G   move        1-4 alt+1-4  view",
         "ctrl-d/ctrl-u    jump ±10    tab  cycle view",
         "o SPC SPC c      capture     /    search",
-        "enter / i / a    edit task   ?    this help",
+        "enter / i / a    edit task   /    search",
+        "n N              next/prev match",
         "x                complete    d    archive",
         "SPC d/u/r        defer/due/remind prompt",
         "SPC o            organize    > <  shift due ±1",

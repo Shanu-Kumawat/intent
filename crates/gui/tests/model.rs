@@ -428,13 +428,24 @@ fn editor_notes_field_and_tab() {
 
 #[test]
 fn search_flow() {
+    // Vim-style: the list stays whole, the cursor jumps to the first match.
     let mut f = fx();
     seed(&mut f, &["buy milk", "buy eggs", "sell car"]);
     feed(&mut f, "/");
     type_prompt_text(&mut f, "buy");
     feed(&mut f, "<cr>");
     assert_eq!(f.state.search_query.as_deref(), Some("buy"));
-    assert_eq!(f.state.rows.len(), 2);
+    assert_eq!(f.state.rows.len(), 3, "search no longer filters the list");
+    assert_eq!(
+        f.state.cursor_task().unwrap().title,
+        "buy eggs",
+        "cursor lands on the first match (rows are updated-desc)"
+    );
+    assert!(
+        f.state.status.contains("1/2"),
+        "status reports match position: {:?}",
+        f.state.status
+    );
     feed(&mut f, "<esc>");
     assert!(f.state.search_query.is_none());
     assert_eq!(
@@ -442,6 +453,78 @@ fn search_flow() {
         TaskView::Inbox,
         "esc returns to the previous view"
     );
+}
+
+#[test]
+fn search_n_n_cycles_matches_with_wrap() {
+    let mut f = fx();
+    seed(&mut f, &["buy milk", "buy eggs", "sell car"]);
+    feed(&mut f, "/");
+    type_prompt_text(&mut f, "buy");
+    feed(&mut f, "<cr>");
+    let first = f.state.cursor_task().unwrap().id.clone();
+    feed(&mut f, "n");
+    let second = f.state.cursor_task().unwrap().id.clone();
+    assert_ne!(first, second, "n moves to the next match");
+    assert!(f.state.status.contains("2/2"));
+    feed(&mut f, "n");
+    assert_eq!(
+        f.state.cursor_task().unwrap().id,
+        first,
+        "n wraps to the first match"
+    );
+    feed(&mut f, "N");
+    assert_eq!(
+        f.state.cursor_task().unwrap().id,
+        second,
+        "N cycles backward"
+    );
+}
+
+#[test]
+fn search_is_live_while_typing() {
+    // Neovim-style: the query applies on every keystroke, before enter.
+    let mut f = fx();
+    seed(&mut f, &["alpha thing", "plain", "beta thing"]);
+    feed(&mut f, "/");
+    type_prompt_text(&mut f, "th");
+    assert_eq!(
+        f.state.search_query.as_deref(),
+        Some("th"),
+        "query is live before enter"
+    );
+    assert_eq!(f.state.rows.len(), 3, "list stays whole");
+    assert!(
+        f.state.cursor_task().unwrap().title.contains("th"),
+        "cursor already on a match"
+    );
+    feed(&mut f, "<esc>"); // cancel mid-prompt
+    assert!(f.state.prompt.is_none());
+    assert!(
+        f.state.search_query.is_none(),
+        "esc cancels the live search"
+    );
+    assert_eq!(f.state.cursor, 0, "pre-search cursor restored");
+    assert_eq!(f.state.rows.len(), 3);
+    // backspacing to empty drops the search entirely
+    feed(&mut f, "/");
+    type_prompt_text(&mut f, "th");
+    feed(&mut f, "<bs> <bs>");
+    assert!(f.state.search_query.is_none(), "empty query = no search");
+    feed(&mut f, "<esc>");
+}
+
+#[test]
+fn search_no_matches_reports() {
+    let mut f = fx();
+    seed(&mut f, &["alpha"]);
+    feed(&mut f, "/");
+    type_prompt_text(&mut f, "zzzz");
+    feed(&mut f, "<cr>");
+    assert!(f.state.status.contains("no matches"));
+    feed(&mut f, "n");
+    assert!(f.state.status.contains("no matches"));
+    assert_eq!(f.state.cursor, 0);
 }
 
 // ---- commands ---------------------------------------------------------------------
@@ -932,10 +1015,54 @@ fn search_clear_restores_pre_search_cursor() {
     feed(&mut f, "/");
     type_prompt_text(&mut f, "thing");
     feed(&mut f, "<cr>");
-    assert_eq!(f.state.cursor, 0, "results start at the top");
+    assert!(
+        f.state.cursor_task().unwrap().title.contains("thing"),
+        "cursor on the first match (rows are updated-desc, gamma first)"
+    );
+    feed(&mut f, "n"); // move to the second match
+    assert_ne!(f.state.cursor, 0);
     feed(&mut f, "<esc>");
     assert!(f.state.search_query.is_none());
     assert_eq!(f.state.cursor, 1, "pre-search cursor restored");
+}
+
+#[test]
+fn editor_ctrl_j_k_switch_fields_in_insert_mode() {
+    let mut f = fx();
+    seed(&mut f, &["abc"]);
+    feed(&mut f, "<cr>");
+    feed(&mut f, "i"); // title, insert
+    feed(&mut f, "<c-j>");
+    assert!(
+        !f.state.editor.as_ref().unwrap().focus_title,
+        "ctrl+j moves title→notes WITHOUT leaving insert"
+    );
+    assert_eq!(
+        f.state.editor.as_ref().unwrap().notes.mode_name(),
+        "INSERT",
+        "insert mode carried across the switch"
+    );
+    feed(&mut f, "<c-k>");
+    assert!(f.state.editor.as_ref().unwrap().focus_title);
+    feed(&mut f, "<esc>");
+    feed(&mut f, "<esc>");
+}
+
+#[test]
+fn boundary_j_k_stay_in_field() {
+    let mut f = fx();
+    seed(&mut f, &["abc"]);
+    feed(&mut f, "<cr>");
+    feed(&mut f, "j"); // in the one-line title: stays, does NOT jump to notes
+    assert!(f.state.editor.as_ref().unwrap().focus_title);
+    feed(&mut f, "tab"); // to notes
+    feed(&mut f, "o"); // open a line (notes now 2 lines)
+    feed(&mut f, "<esc>");
+    feed(&mut f, "G"); // bottom line
+    feed(&mut f, "j"); // boundary: stays
+    assert!(!f.state.editor.as_ref().unwrap().focus_title, "no teleport");
+    feed(&mut f, "<esc>");
+    feed(&mut f, "<esc>");
 }
 
 #[test]
@@ -1115,7 +1242,11 @@ fn search_then_view_switch_keeps_remembered_cursor() {
     feed(&mut f, "/");
     type_prompt_text(&mut f, "thing");
     feed(&mut f, "<cr>");
-    assert_eq!(f.state.rows.len(), 2);
+    assert_eq!(f.state.rows.len(), 4, "search shows the whole list");
+    assert!(
+        f.state.cursor_task().unwrap().title.contains("thing"),
+        "cursor on the first match"
+    );
     feed(&mut f, "2"); // Today (empty)
     feed(&mut f, "1"); // back to Inbox
     assert_eq!(f.state.cursor, 3, "remembered inbox cursor survives search");

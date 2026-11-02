@@ -270,10 +270,10 @@ Pending state is always visible, so waiting is safe.
 | `+` `=` / `-`      | raise / lower priority (cycle none↔low↔medium↔high; count ok)  |
 | `y` / `Y`          | yank title / title+notes to system clipboard                   |
 | `V`                | VISUAL (line-wise): `j`/`k` extend; `x` complete all, `d` archive all, `y` yank titles (newline-joined), `esc` cancel |
-| `/`                | search prompt; enter → list shows matches (title/notes/project/tags, all ANDed terms, case-insensitive); `esc` in list clears back to the previous view; `n`/`N` are reserved |
+| `/`                | search prompt; enter → the list keeps showing every non-archived task, non-matching titles dim, and the cursor jumps to the first match (title/notes/project/tags, all ANDed terms, case-insensitive); `n`/`N` cycle matches forward/backward with wrap; `esc` clears back to the previous view and cursor |
 | `:`                | command prompt (§4.4)                                          |
 | `?`                | help overlay (full keymap; any key closes)                    |
-| `1`–`4`            | switch view inbox/today/upcoming/completed (only with no pending count). Counts therefore always start with `5`–`9`; `5gg` is the smallest count-gg. |
+| `1`–`4`, `alt+1`–`alt+4` | switch view inbox/today/upcoming/completed (bare digits only with no pending count). Counts therefore always start with `5`–`9`; `5gg` is the smallest count-gg. |
 | `tab` / `shift-tab`| next / previous view                                           |
 | `u` / `ctrl-r`     | undo / redo task operations (§5)                               |
 | `.`                | repeat last task operation (`x d > < + -` are repeatable), count replaces the original count |
@@ -291,9 +291,11 @@ message and clear the pending state — never a silent no-op.
 
 Opened by `enter`/`i`/`a` from the list. Two stacked fields, **TITLE**
 (single line) and **NOTES** (multi-line), each an independent text buffer.
-The focused field is highlighted; `tab`/`shift-tab` and boundary `j`/`k`
-move between fields (cursor column carried over, clamped). Line-oriented
-operations never cross the field boundary. The caret is always visible: a
+The focused field is highlighted; `tab`/`shift-tab` and `ctrl+j`/`ctrl+k`
+(explicitly, in both NORMAL and INSERT) move between fields (cursor column
+carried over, clamped). Boundary `j`/`k` stay inside the field, like vim —
+a motion never teleports between fields. Line-oriented operations never
+cross the field boundary. The caret is always visible: a
 block (inverse character) in NORMAL/VISUAL, a thin vertical bar in INSERT —
 mid-line, at end-of-line, and on empty lines alike.
 

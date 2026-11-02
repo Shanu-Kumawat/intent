@@ -553,17 +553,19 @@ fn no_timeout_semantics() {
 // ---- single-line (title) -----------------------------------------------------------
 
 #[test]
-fn title_field_events() {
+fn title_j_k_stay_put() {
+    // Field switching is explicit (tab / ctrl-j / ctrl-k); a motion never
+    // teleports between fields, even on a single line or at an edge.
     let (mut e, _) = engine_title("hi");
-    assert_eq!(e.handle(Key::new("j")), EngineEvent::NextField);
-    assert_eq!(e.handle(Key::new("k")), EngineEvent::PrevField);
+    assert_eq!(e.handle(Key::new("j")), EngineEvent::None);
+    assert_eq!(e.handle(Key::new("k")), EngineEvent::None);
 }
 
 #[test]
-fn notes_field_boundary_events() {
+fn notes_boundary_j_k_stay_put() {
     let (mut e, _) = engine("only");
-    assert_eq!(e.handle(Key::new("j")), EngineEvent::NextField);
-    assert_eq!(e.handle(Key::new("k")), EngineEvent::PrevField);
+    assert_eq!(e.handle(Key::new("j")), EngineEvent::None);
+    assert_eq!(e.handle(Key::new("k")), EngineEvent::None);
     assert_eq!(e.handle(Key::new("l")), EngineEvent::None);
 }
 
