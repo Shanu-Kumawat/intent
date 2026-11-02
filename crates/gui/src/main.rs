@@ -42,6 +42,9 @@ const VISUAL_PLATE: gpui::Rgba = rgba_lit(0.788, 0.788, 0.788, 1.0); // #c9c9c9
 const DANGER: gpui::Rgba = rgba_lit(0.60, 0.11, 0.11, 1.0); // #991b1b
 /// Body font size (px); every surface derives from these two.
 const TEXT: f32 = 16.0;
+/// Horizontal indent of the view heading (the plates run full-bleed from
+/// the window edge beneath it, like the user's mock).
+const LIST_INDENT: f32 = 24.0;
 /// Secondary text (meta columns, subtitles, footer hints).
 const SMALL: f32 = 13.0;
 const PAPER: gpui::Rgba = SURFACE;
@@ -298,36 +301,59 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
 
     let mut row = div()
         .id(SharedString::from(format!("task-{ix}")))
+        .relative()
         .flex()
         .items_center()
         .gap_3()
         .w_full()
         .h(px(36.0))
-        .px_4()
+        .pl(px(8.0))
+        .pr(px(LIST_INDENT + 24.0))
         .border_b_1()
         .border_color(HAIRLINE);
     // The delete-armed row turns red — the app's single non-monochrome
     // accent, reserved for imminent destruction.
     let armed = state.delete_armed.as_deref() == Some(task.id.as_str());
-    if armed {
-        row = row.bg(DANGER).text_color(FG);
+    let ink = if in_visual || selected { CHROME } else { FG };
+    // Plates are inset on BOTH sides by LIST_INDENT: aligned with the
+    // heading's first letter on the left, mirrored margin on the right.
+    let plate = if armed {
+        Some(DANGER)
     } else if in_visual {
-        // Soft inverse for the whole selection; the cursor row inside it
-        // gets a thin dark left edge so extending with j/k stays oriented.
-        row = row.bg(VISUAL_PLATE).text_color(CHROME);
-        if selected {
-            row = row.relative().child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top_0()
-                    .bottom_0()
-                    .w(px(2.0))
-                    .bg(CHROME),
-            );
-        }
+        Some(VISUAL_PLATE)
     } else if selected {
-        row = row.bg(FG).text_color(CHROME);
+        Some(FG)
+    } else {
+        None
+    };
+    if let Some(color) = plate {
+        row = row.child(
+            div()
+                .absolute()
+                .left(px(LIST_INDENT))
+                .top_0()
+                .bottom_0()
+                .right(px(LIST_INDENT))
+                .bg(color),
+        );
+    }
+    if armed {
+        row = row.text_color(FG);
+    } else if in_visual || selected {
+        row = row.text_color(CHROME);
+    }
+    if in_visual && selected {
+        // Cursor row inside the selection: thin dark edge on the plate's
+        // left, so extending with j/k stays oriented.
+        row = row.child(
+            div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .w(px(2.0))
+                .bg(CHROME),
+        );
     }
     row.child(
         div()
@@ -338,7 +364,22 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
             })
             .child(priority_mark(task.priority)),
     )
-    .child(div().w(px(20.0)).child(mark))
+    .child(
+        // The pending-inbox checkbox is drawn (not the □ glyph) so its
+        // size is ours to tune; the other marks stay glyphs.
+        div().w(px(22.0)).flex().items_center().child(
+            if task.inbox && task.status == intent_core::Status::Active {
+                div()
+                    .w(px(14.0))
+                    .h(px(14.0))
+                    .border_2()
+                    .border_color(ink)
+                    .flex_none()
+            } else {
+                div().child(mark)
+            },
+        ),
+    )
     .child({
         // While searching, matched substrings get the inverse plate right
         // in the title (neovim-style hl-search). Rows already on the
@@ -352,6 +393,8 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
         if ranges.is_empty() {
             div()
                 .flex_1()
+                .min_w_0()
+                .overflow_x_hidden()
                 .font_weight(if task.status == intent_core::Status::Done {
                     gpui::FontWeight::THIN
                 } else {
@@ -387,6 +430,8 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
                 .collect();
             div()
                 .flex_1()
+                .min_w_0()
+                .overflow_x_hidden()
                 .child(gpui::StyledText::new(title).with_default_highlights(&base, highlights))
         }
     })
@@ -445,17 +490,25 @@ fn view_heading(state: &GuiState) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
-        .gap_0()
-        .px_4()
+        .gap_1()
+        .pl(px(LIST_INDENT))
+        .pr(px(16.0))
         .pt_3()
-        .pb_1()
+        .pb_3()
         .child(
             div()
                 .text_size(px(24.0))
+                .line_height(px(26.0))
                 .font_weight(gpui::FontWeight::BOLD)
                 .child(name),
         )
-        .child(div().text_size(px(SMALL)).text_color(MUTED).child(sub))
+        .child(
+            div()
+                .text_size(px(SMALL))
+                .line_height(px(16.0))
+                .text_color(MUTED)
+                .child(sub),
+        )
 }
 
 fn status_bar(state: &GuiState) -> impl IntoElement {
