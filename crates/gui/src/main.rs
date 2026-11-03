@@ -440,11 +440,13 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
                 .when(task.status == intent_core::Status::Done, |d| {
                     d.line_through()
                 })
-                .when(dimmed, |d| d.text_color(MUTED))
+                // Dimming only applies off-plate: muted-on-white would be
+                // unreadable on the focused row.
+                .when(dimmed && !inverse, |d| d.text_color(MUTED))
                 .child(title)
         } else {
             let base = mono_style(
-                if dimmed { MUTED } else { FG },
+                if dimmed && !inverse { MUTED } else { FG },
                 if task.status == intent_core::Status::Done {
                     gpui::FontWeight::THIN
                 } else {

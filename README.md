@@ -3,18 +3,11 @@
 **A keyboard-first, local-first commitment tracker.** Vim reimagined as a
 personal commitment-management system — not a todo app with shortcuts bolted on.
 
-```
-┌──────────────────────────────────────────────────────┐
-│ INTENT /// TODAY                              2026-10-26│
-├──────┬───────────────────────────────────────────────┤
-│ 1 IN │  !!! □ Renew passport        DUE 2026-11-02    │
-│ 2 TO │    …                                           │
-│ 3 UP │                                                │
-│ 4 CO │                                                │
-├──────┴───────────────────────────────────────────────┤
-│ NORMAL  SPC  k3x9qa  3/12   captured k3x9qa           │
-└──────────────────────────────────────────────────────┘
-```
+![Intent — the Inbox with a focused task](docs/screenshots/inbox.png)
+
+*Live search* — matches highlight as you type, `n`/`N` cycle:
+
+![Intent — live search with match highlighting](docs/screenshots/search.png)
 
 - **Zero-friction capture** — `o`, type, `enter`. No project, priority, or date
   required. Organize later or never.
@@ -95,22 +88,23 @@ reloads within 2 seconds when the CLI (or an agent) changes something.
 | Keys | Action |
 |---|---|
 | `j` `k` `gg` `G` `ctrl-d/ctrl-u` | move |
-| `1`–`4` / `tab` | switch view / cycle views |
-| `o` or `space space` | capture (inbox) |
-| `enter` / `i` | edit task (title + notes, full Vim editing) |
+| `1`–`4` (`alt+1`–`4`) / `tab` | switch view / cycle views |
+| `o`, `space space`, `space c` | capture (inbox) |
+| `enter` / `i` / `a` | edit task (title + notes, full Vim editing; `ctrl+j`/`ctrl+k` switch fields) |
 | `x` | complete ⇄ reopen ⇄ revive |
 | `space d` / `space u` / `space r` | defer / due / remind prompts (smart dates) |
 | `space o` | organize: assign project, leave inbox |
 | `>` `<` | shift due ±1 day (no due → today) |
 | `+` `-` | raise / lower priority |
 | `V` then `j` `x`/`d`/`y` | select tasks, complete/archive/yank them |
-| `/` | search (terms ANDed, case-insensitive) |
+| `/` | live search — matches highlight as you type; `n`/`N` cycle |
 | `d` / `space D` | archive / unarchive |
-| `D` | delete — explicit confirm, undoable in-session |
+| `D D` | delete — first `D` arms the row (red), second confirms; undoable in-session |
 | `y` `Y` | yank title / title+notes to the system clipboard |
 | `u` / `ctrl-r` | undo / redo task operations |
 | `.` | repeat last operation |
 | `:` | command prompt (`:today`, `:due friday`, `:q`, …) |
+| `?` | full keymap overlay |
 
 Modes, pending sequences (no timeouts — they wait, visible in the status
 line), and clipboard semantics (deletes never clobber your yank) follow

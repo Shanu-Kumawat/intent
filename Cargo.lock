@@ -2902,7 +2902,7 @@ dependencies = [
 
 [[package]]
 name = "intent-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2913,7 +2913,7 @@ dependencies = [
 
 [[package]]
 name = "intent-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jiff",
  "rand 0.8.8",
@@ -2925,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "intent-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "gpui",
  "intent-core",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "intent-vim"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "interpolate_name"

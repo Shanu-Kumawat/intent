@@ -19,7 +19,7 @@ commands), and a help overlay.
 .B j k gg G ctrl-d ctrl-u
 move
 .TP
-.B 1 2 3 4
+.B 1 2 3 4 " (or " alt+1 ".." alt+4" ")"
 switch view (inbox / today / upcoming / completed)
 .TP
 .B tab
@@ -28,8 +28,11 @@ cycle views
 .BR o " / " "space space"
 capture
 .TP
-.BR enter " / " i
+.BR enter " / " i " / " a
 edit task
+.TP
+.BR ctrl+j " / " ctrl+k
+switch between title and notes (both modes)
 .TP
 .B x
 complete / reopen / revive
@@ -59,7 +62,7 @@ visual (multi-task) mode
 archive / unarchive
 .TP
 .B D
-delete (confirmed, session-undoable)
+delete \(em press twice; the row turns red while armed (session-undoable)
 .TP
 .BR y " / " Y
 yank title / title+notes
@@ -71,7 +74,11 @@ undo / redo task operations
 repeat last operation
 .TP
 .B /
-search
+search \(em live; matches highlight as you type,
+.B n
+/
+.B N
+cycle matches
 .TP
 .B :
 command prompt
