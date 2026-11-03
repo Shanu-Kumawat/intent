@@ -1,23 +1,6 @@
-# Maintainer: shanu <shanu@local>
-#
-# DRAFT — adapt before submitting to the AUR.
-#
-# Pre-submission checklist:
-#   1. Confirm the pkgname "intent" is free on the AUR; if taken, use a
-#      qualified name (e.g. intent-tasks) and update Exec/Icon references.
-#   2. Replace sha256sums 'SKIP' with the real checksum of the v-prefixed
-#      tag tarball:  updpkgsums  (or `makepkg -g`).
-#   3. Validate:  makepkg --printsrcinfo > .SRCINFO && namcap PKGBUILD
-#      and build in a clean chroot (devtools) before uploading.
-#   4. The runtime deps below were derived from `ldd target/release/intent-gui`
-#      — re-verify after any gpui upgrade.
-#
-# NOTE: the icon/desktop cache updates are intentionally absent — pacman's
-# native hooks (gtk-update-icon-cache, update-desktop-database) run
-# automatically after install.
-
+# Maintainer: Shanu Kumawat <162787197+Shanu-Kumawat@users.noreply.github.com>
 pkgname=intent
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Keyboard-first, local-first task management with a Vim-like interface"
 arch=('x86_64')
@@ -32,16 +15,18 @@ optdepends=('vulkan-intel: Intel GPU Vulkan driver'
             'nvidia-utils: NVIDIA GPU Vulkan driver')
 makedepends=('rust' 'clang' 'cmake' 'pkgconf')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('6297f7cb8295f49235e7b780def5c0a090b71e1ac68248124e763605cc0a9cfb')
 options=('!lto')  # gpui/blade link times balloon and have misbehaved under LTO
 
 build() {
   cd "$pkgname-$pkgver"
+  export CARGO_HOME="$srcdir/.cargo-home"
   make build
 }
 
 check() {
   cd "$pkgname-$pkgver"
+  export CARGO_HOME="$srcdir/.cargo-home"
   make test
 }
 

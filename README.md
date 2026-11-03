@@ -42,10 +42,10 @@ everything with `make uninstall`.
 On a personal machine this buys nothing over `~/.local` and needs sudo on
 every update.
 
-**Switching to a package later:** when the AUR package exists
-(see `packaging/PKGBUILD.draft`), run `make uninstall` first — both
+**Switching to a package later:** run `make uninstall` first — both
 `~/.local/bin` and `/usr/local/bin` shadow `/usr/bin` in PATH, and
 `intent --version` will tell you which binary is winning if in doubt.
+The AUR package definition lives in `packaging/PKGBUILD`.
 
 ## Quick start
 
@@ -189,8 +189,7 @@ binary. Run `make test` for the current count.
 - [crates/cli](crates/cli) — CLI
 - [crates/gui](crates/gui) — GPUI app
 - [docs/](docs) — man pages (`intent(1)`, `intent-gui(1)`)
-- [packaging/](packaging) — desktop entry, logo, and `PKGBUILD.draft` for the
-  future AUR package
+- [packaging/](packaging) — desktop entry, logo, and the AUR `PKGBUILD`
 - `scripts/spec_verify.py` — 37-check runtime conformance suite against SPEC
 - `vendor/xattr` — patched copy of `xattr 0.2.3` (build fix for `libc ≥
   0.2.191`, wired via `[patch.crates-io]`)
