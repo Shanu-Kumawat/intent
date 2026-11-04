@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Intent launcher icon - the Commitment Mark on its plate.
+
+  Same three shapes as packaging/intent.svg (two brackets, one solid
+  square) inverted for launcher visibility: white mark on the black
+  plate. Sharp corners throughout; the plate is full-bleed square, no
+  rounding - the identity stays sharp at every size.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- plate -->
+  <rect x="0" y="0" width="128" height="128" fill="#0e0e0e"/>
+  <!-- left bracket -->
+  <path d="M 24 28 H 50 V 43 H 39 V 85 H 50 V 100 H 24 Z" fill="#ffffff"/>
+  <!-- right bracket -->
+  <path d="M 104 28 H 78 V 43 H 89 V 85 H 78 V 100 H 104 Z" fill="#ffffff"/>
+  <!-- the commitment -->
+  <rect x="53" y="53" width="22" height="22" fill="#ffffff"/>
+</svg>

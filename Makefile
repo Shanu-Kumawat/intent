@@ -62,7 +62,7 @@ install: | require-bins
 	sed -e "s|^Exec=.*|Exec=$(abspath $(PREFIX))/bin/intent-gui|" \
 	    -e "s|^TryExec=.*|TryExec=$(abspath $(PREFIX))/bin/intent-gui|" \
 	    packaging/intent-gui.desktop > $(APPS)/intent-gui.desktop
-	install -m644 packaging/intent.svg                 $(ICONS)/intent.svg
+	install -m644 packaging/intent-icon.svg            $(ICONS)/intent.svg
 ifeq ($(DESTDIR),)
 	-gtk-update-icon-cache -qtf $(PREFIX)/share/icons/hicolor 2>/dev/null || true
 	-update-desktop-database $(PREFIX)/share/applications 2>/dev/null || true
