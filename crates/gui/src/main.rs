@@ -71,6 +71,10 @@ const CHECKBOX: f32 = 14.0;
 /// (!!! paints ~21px but reserves ~29px of advance): keeps the gap after
 /// it equal to the row's left padding. Coupled to TEXT and MONO.
 const PRI_TRAILING: f32 = -9.0;
+/// Keymap overlay: width of the keys column and of each of the two
+/// columns (keys + description, with right margin to spare).
+const KEY_COL_W: f32 = 136.0;
+const KEYMAP_COL_W: f32 = 362.0;
 /// Insert-mode caret bar.
 const CARET_W: f32 = 2.0;
 const CARET_H: f32 = 20.0;
@@ -211,8 +215,37 @@ fn header(state: &GuiState) -> impl IntoElement {
         .child(
             div()
                 .flex()
-                .items_baseline()
+                .items_center()
                 .gap_2()
+                .child(
+                    // The Commitment Mark (packaging/intent.svg), drawn:
+                    // two brackets holding a solid square. The brand row
+                    // uses items_center (not baseline): a border-only box
+                    // has no text baseline, so baseline alignment pushes
+                    // the mark to the top of the header.
+                    div()
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .w(px(6.0))
+                                .h(px(16.0))
+                                .border_l_2()
+                                .border_t_2()
+                                .border_b_2()
+                                .border_color(FG),
+                        )
+                        .child(div().w(px(5.0)).h(px(5.0)).bg(FG))
+                        .child(
+                            div()
+                                .w(px(6.0))
+                                .h(px(16.0))
+                                .border_r_2()
+                                .border_t_2()
+                                .border_b_2()
+                                .border_color(FG),
+                        ),
+                )
                 .child(div().font_weight(gpui::FontWeight::BOLD).child("INTENT"))
                 .child(div().text_color(MUTED).child("///"))
                 .child(
@@ -794,21 +827,57 @@ fn editor_pane(state: &GuiState, ts: &std::sync::Arc<gpui::WindowTextSystem>) ->
 }
 
 fn help_overlay() -> gpui::AnyElement {
-    let keys: &[&str] = &[
-        "j k ↑ ↓ g g G   move        1-4 alt+1-4  view",
-        "ctrl-d/ctrl-u    jump ±10    tab  cycle view",
-        "o SPC SPC c      capture     ?    keymap",
-        "enter / i / a    edit task   /    search (live)",
-        "n N              cycle matches",
-        "x                complete    d    archive",
-        "SPC d/u/r        defer/due/remind prompt",
-        "SPC o            organize    > <  shift due ±1",
-        "SPC D            unarchive   SPC p  paste system clipboard",
-        "+ - =            priority    .    repeat",
-        "y Y              yank        V    visual mode",
-        "D D              delete (2nd confirms)   u ctrl-r undo/redo",
-        ":                commands    esc  cancel",
+    // (keys, description) pairs, rendered as two balanced columns with a
+    // fixed key width - descriptions can never collide with the next
+    // entry, and adding a row re-balances automatically.
+    let entries: &[(&str, &str)] = &[
+        ("j k gg G", "move"),
+        ("ctrl-d ctrl-u", "jump +-10 rows"),
+        ("1-4 alt+1-4", "switch view"),
+        ("tab", "cycle views"),
+        ("o SPC SPC c", "capture"),
+        ("enter i a", "edit task"),
+        ("ctrl+j ctrl+k", "switch fields"),
+        ("/", "live search"),
+        ("n N", "cycle matches"),
+        ("V", "visual mode"),
+        ("x", "complete / reopen"),
+        ("d", "archive"),
+        ("SPC d u r", "defer / due / remind"),
+        ("SPC o", "organize"),
+        ("SPC D", "unarchive"),
+        ("SPC p", "paste system clipboard"),
+        ("> <", "shift due +-1 day"),
+        ("+ - =", "priority"),
+        ("y Y", "yank"),
+        ("D D", "delete (2nd confirms)"),
+        ("u ctrl-r", "undo / redo"),
+        (".", "repeat last operation"),
+        (":", "commands"),
+        ("esc", "cancel / disarm"),
     ];
+    let column = |items: &'static [(&'static str, &'static str)]| {
+        // Fixed width: with flex_1 the two columns compressed each other
+        // and long descriptions touched the panel boundary.
+        let mut c = div().flex().flex_col().gap(px(S1)).w(px(KEYMAP_COL_W)).flex_none();
+        for (k, d) in items {
+            c = c.child(
+                div()
+                    .flex()
+                    .gap(px(S3))
+                    .child(
+                        div()
+                            .w(px(KEY_COL_W))
+                            .flex_none()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .child(*k),
+                    )
+                    .child(div().flex_1().text_color(MUTED).child(*d)),
+            );
+        }
+        c
+    };
+    let half = entries.len().div_ceil(2);
     div()
         .absolute()
         .size_full()
@@ -825,13 +894,19 @@ fn help_overlay() -> gpui::AnyElement {
                 .p(px(S6))
                 .flex()
                 .flex_col()
-                .gap(px(S2))
+                .gap(px(S4))
                 .child(
                     div()
                         .font_weight(gpui::FontWeight::BLACK)
                         .child("INTENT — KEYMAP"),
                 )
-                .children(keys.iter().map(|k| div().child(*k)))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(S6))
+                        .child(column(&entries[..half]))
+                        .child(column(&entries[half..])),
+                )
                 .child(div().text_color(MUTED).child("any key closes")),
         )
         .into_any_element()

@@ -1,5 +1,7 @@
 # INTENT
 
+<p align="center"><img src="packaging/intent.svg" width="128" alt="The Commitment Mark — two brackets holding a solid square"></p>
+
 **A keyboard-first, local-first commitment tracker.** Vim reimagined as a
 personal commitment-management system — not a todo app with shortcuts bolted on.
 
