@@ -859,7 +859,12 @@ fn help_overlay() -> gpui::AnyElement {
     let column = |items: &'static [(&'static str, &'static str)]| {
         // Fixed width: with flex_1 the two columns compressed each other
         // and long descriptions touched the panel boundary.
-        let mut c = div().flex().flex_col().gap(px(S1)).w(px(KEYMAP_COL_W)).flex_none();
+        let mut c = div()
+            .flex()
+            .flex_col()
+            .gap(px(S1))
+            .w(px(KEYMAP_COL_W))
+            .flex_none();
         for (k, d) in items {
             c = c.child(
                 div()
