@@ -98,6 +98,8 @@ reloads within 2 seconds when the CLI (or an agent) changes something.
 | `x` | complete ⇄ reopen ⇄ revive |
 | `space d` / `space u` / `space r` | defer / due / remind prompts (smart dates) |
 | `space o` | organize: assign project, leave inbox |
+| `space t` | tag: `+add` / `−remove` tokens |
+| `space f` | lens: narrow any view to `·project` / `#tag` (sidebar lists them with counts; esc clears) |
 | `>` `<` | shift due ±1 day (no due → today) |
 | `+` `-` | raise / lower priority |
 | `V` then `j` `x`/`d`/`y` | select tasks, complete/archive/yank them |

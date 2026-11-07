@@ -12,7 +12,7 @@ use gpui::{
 
 use intent_core::{Store, TaskView};
 use intent_gui::keys;
-use intent_gui::model::{priority_mark, GuiState, PromptKind};
+use intent_gui::model::{priority_mark, Filter, GuiState, PromptKind, SidebarItem};
 use intent_vim::{Clipboard, Engine};
 
 // Dark monochrome theme. Two anchor tones (INK body / PAPER foreground)
@@ -264,7 +264,17 @@ fn header(state: &GuiState) -> impl IntoElement {
         .child(div().child(SharedString::from(state.today.to_string())))
 }
 
-fn sidebar(state: &GuiState) -> impl IntoElement {
+fn sidebar_section_header(name: &str) -> gpui::Div {
+    div()
+        .px(px(S4))
+        .pt(px(S3))
+        .pb(px(S1))
+        .text_size(px(SMALL))
+        .text_color(MUTED)
+        .child(name.to_string())
+}
+
+fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
     // Archived is alt-only (bare 5-9 start counts), so its hint says so.
     let items: Vec<(&str, TaskView)> = vec![
         ("1", TaskView::Inbox),
@@ -286,13 +296,18 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
         let active = state.view == view && !state.search_active();
         let count = state.view_counts.get(&view).copied().unwrap_or(0);
         let label = format!("{key} {}", view.to_string().to_uppercase());
+        let item = SidebarItem::View(view);
         let mut row = div()
             .id(SharedString::from(format!("sb-{key}")))
             .flex()
             .justify_between()
             .px(px(S4))
             .py(px(S2))
-            .text_size(px(SIDEBAR_TEXT));
+            .text_size(px(SIDEBAR_TEXT))
+            .on_click(cx.listener(move |shell, _, _, cx| {
+                shell.state.activate_sidebar(item.clone());
+                cx.notify();
+            }));
         if active {
             row = row
                 .bg(FG)
@@ -301,6 +316,37 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
         }
         col = col.child(row.child(label).child(format!("{count}")));
     }
+
+    // Projects and tags: the organizing surface. Clicking (or re-clicking
+    // to clear) toggles a lens over the current view; the busiest six are
+    // listed so the sidebar stays a fixed, scannable height.
+    col = col.child(sidebar_section_header("PROJECTS"));
+    for (name, count) in state.projects.iter().take(6) {
+        let active = state.filter.as_ref() == Some(&Filter::Project(name.clone()));
+        col = col.child(lens_row(
+            state,
+            cx,
+            "p",
+            &format!("·{name}"),
+            SidebarItem::Project(name.clone()),
+            *count,
+            active,
+        ));
+    }
+    col = col.child(sidebar_section_header("TAGS"));
+    for (name, count) in state.tags.iter().take(6) {
+        let active = state.filter.as_ref() == Some(&Filter::Tag(name.clone()));
+        col = col.child(lens_row(
+            state,
+            cx,
+            "t",
+            &format!("#{name}"),
+            SidebarItem::Tag(name.clone()),
+            *count,
+            active,
+        ));
+    }
+
     col = col.child(div().flex_1());
     col = col.child(
         div()
@@ -313,6 +359,46 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
             .child("? keymap  :q quit"),
     );
     col
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lens_row(
+    _state: &GuiState,
+    cx: &mut Context<Shell>,
+    ns: &str,
+    label: &str,
+    item: SidebarItem,
+    count: usize,
+    active: bool,
+) -> gpui::Stateful<gpui::Div> {
+    let mut row = div()
+        .id(SharedString::from(format!("sb-{ns}-{}", item_key(&item))))
+        .flex()
+        .justify_between()
+        .px(px(S4))
+        .py(px(S2))
+        .text_size(px(SIDEBAR_TEXT))
+        .on_click(cx.listener(move |shell, _, _, cx| {
+            shell.state.activate_sidebar(item.clone());
+            cx.notify();
+        }));
+    if active {
+        row = row
+            .bg(FG)
+            .text_color(CHROME)
+            .font_weight(gpui::FontWeight::BOLD);
+    }
+    row.child(label.to_string()).child(format!("{count}"))
+}
+
+/// Stable element id for a lens row (names may contain odd characters).
+fn item_key(item: &SidebarItem) -> String {
+    match item {
+        SidebarItem::View(v) => v.as_str().to_string(),
+        SidebarItem::Project(p) | SidebarItem::Tag(p) => {
+            p.chars().filter(|c| c.is_alphanumeric()).collect()
+        }
+    }
 }
 
 fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
@@ -564,7 +650,13 @@ fn view_heading(state: &GuiState) -> impl IntoElement {
             }
         };
         let n = state.rows.len();
-        (name, format!("{} task{}", n, if n == 1 { "" } else { "s" }))
+        let mut sub = format!("{} task{}", n, if n == 1 { "" } else { "s" });
+        if let Some(f) = &state.filter {
+            // The lens is always visible in the heading — a forgotten lens
+            // must never look like a mysteriously short list (§4.1).
+            sub = format!("{} — {}", sub, f.chip());
+        }
+        (name, sub)
     };
     div()
         .flex()
@@ -631,6 +723,16 @@ fn status_bar(state: &GuiState) -> impl IntoElement {
         )
         .child(div().text_color(MUTED).child(id))
         .child(div().text_color(MUTED).child(pos))
+        .children(state.filter.as_ref().map(|f| {
+            // Persistent reminder that rows are narrowed (§4.1).
+            div()
+                .bg(FG)
+                .text_color(CHROME)
+                .px_2()
+                .py_1()
+                .font_weight(gpui::FontWeight::BOLD)
+                .child(SharedString::from(f.chip()))
+        }))
         .child(div().flex_1())
         .child(
             div()
@@ -852,6 +954,8 @@ fn help_overlay() -> gpui::AnyElement {
         ("d", "archive"),
         ("SPC d u r", "defer / due / remind"),
         ("SPC o", "organize"),
+        ("SPC t", "tag (+add / -remove)"),
+        ("SPC f", "lens: ·project / #tag"),
         ("SPC D", "unarchive"),
         ("SPC p", "paste system clipboard"),
         ("> <", "shift due +-1 day"),
@@ -1003,7 +1107,7 @@ impl Render for Shell {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .child(sidebar(state))
+                    .child(sidebar(state, cx))
                     .child(div().flex().flex_col().flex_1().min_w_0().child(main)),
             )
             .child(prompt_bar(state))

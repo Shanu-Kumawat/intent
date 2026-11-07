@@ -9,7 +9,7 @@ use std::rc::Rc;
 use intent_core::dates::{is_clear_marker, parse_date};
 use intent_core::model::{Patch, Priority, Task, TaskPatch, TaskView};
 use intent_core::ops::{self, RowChange};
-use intent_core::views::{counts, for_view, search};
+use intent_core::views::{counts, for_view, projects, search, tags as core_tags};
 use intent_core::{NewTask, Store};
 
 use crate::keys;
@@ -31,6 +31,8 @@ pub enum PromptKind {
     Due,
     Remind,
     Organize,
+    Filter,
+    Tag,
     Search,
     Command,
     ConfirmDelete,
@@ -44,6 +46,8 @@ impl PromptKind {
             PromptKind::Due => "DUE",
             PromptKind::Remind => "REMIND",
             PromptKind::Organize => "ORGANIZE — project (empty = leave inbox)",
+            PromptKind::Filter => "FILTER — ·project / #tag (none = clear)",
+            PromptKind::Tag => "TAG — +add −remove",
             PromptKind::Search => "SEARCH",
             PromptKind::Command => "COMMAND",
             PromptKind::ConfirmDelete => "DELETE PERMANENTLY? [y/N]",
@@ -57,6 +61,40 @@ pub struct Prompt {
     pub error: Option<String>,
     /// Task the prompt acts on (editor task or cursor task at open time).
     pub target_id: Option<String>,
+}
+
+/// A lens over the current view (SPEC §4.1 `space f`): narrows the rows to
+/// one project or tag without claiming a view of its own. It persists
+/// across view switches; esc, `:filter none`, or re-selecting it clears it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Filter {
+    Project(String),
+    Tag(String),
+}
+
+impl Filter {
+    pub fn matches(&self, t: &Task) -> bool {
+        match self {
+            Filter::Project(p) => t.project.as_deref() == Some(p.as_str()),
+            Filter::Tag(tag) => t.tags.iter().any(|x| x == tag),
+        }
+    }
+
+    /// Short display chip, same glyphs the row meta uses.
+    pub fn chip(&self) -> String {
+        match self {
+            Filter::Project(p) => format!("·{p}"),
+            Filter::Tag(t) => format!("#{t}"),
+        }
+    }
+}
+
+/// What a sidebar row activates: views switch, lenses toggle (§4.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidebarItem {
+    View(TaskView),
+    Project(String),
+    Tag(String),
 }
 
 /// How the editor was entered from the list (SPEC §4.2).
@@ -131,6 +169,12 @@ pub struct GuiState {
     pub cursor: usize,
     pub visual_anchor: Option<usize>,
     pub search_query: Option<String>,
+    /// Active lens (§4.1 `space f`), if any — narrows rows on every refresh.
+    pub filter: Option<Filter>,
+    /// Distinct projects/tags with counts over non-archived tasks; the
+    /// sidebar sections are rendered from these.
+    pub projects: Vec<(String, usize)>,
+    pub tags: Vec<(String, usize)>,
     /// Row indices of search matches within `rows`, ascending — computed on
     /// every refresh (vim-style search: the list stays whole, the cursor
     /// jumps between matches).
@@ -171,6 +215,9 @@ impl GuiState {
             cursor: 0,
             visual_anchor: None,
             search_query: None,
+            filter: None,
+            projects: Vec::new(),
+            tags: Vec::new(),
             search_matches: Vec::new(),
             delete_armed: None,
             view_counts: BTreeMap::new(),
@@ -202,12 +249,21 @@ impl GuiState {
             Err(_) => return,
         };
         self.view_counts = counts(&all, self.today).into_iter().collect();
+        self.projects = projects(&all);
+        self.tags = core_tags(&all);
         // Vim-style search: the list keeps showing tasks (the whole
         // non-archived set), the cursor jumps between matching rows.
-        let rows = match &self.search_query {
+        let mut rows = match &self.search_query {
             Some(_) => for_view(&all, TaskView::All, self.today),
             None => for_view(&all, self.view, self.today),
         };
+        // The lens narrows the current view; search wins while it's active
+        // (the lens resumes when the search clears).
+        if self.search_query.is_none() {
+            if let Some(f) = &self.filter {
+                rows.retain(|t| f.matches(t));
+            }
+        }
         // Cursor follows the tracked task id, else clamps.
         if let Some(id) = self.follow_id.take() {
             if let Some(idx) = rows.iter().position(|t| t.id == id) {
@@ -538,6 +594,82 @@ impl GuiState {
                 }
                 self.refresh();
             }
+            PromptKind::Filter => {
+                let input = prompt.input.trim();
+                let typed = prompt.input.clone();
+                if input.is_empty() || is_clear_marker(input) {
+                    if self.filter.is_some() {
+                        self.clear_lens();
+                    } else {
+                        self.set_status("no lens active");
+                    }
+                    return;
+                }
+                let next = if let Some(rest) = input.strip_prefix('·') {
+                    let rest = rest.trim();
+                    if rest.is_empty() {
+                        self.open_prompt_with_input(PromptKind::Filter, None, typed);
+                        self.prompt_error("project name required after ·");
+                        return;
+                    }
+                    Some(Filter::Project(rest.to_string()))
+                } else if let Some(rest) = input.strip_prefix('#') {
+                    let rest = rest.trim();
+                    if rest.is_empty() {
+                        self.open_prompt_with_input(PromptKind::Filter, None, typed);
+                        self.prompt_error("tag name required after #");
+                        return;
+                    }
+                    Some(Filter::Tag(rest.to_string()))
+                } else {
+                    self.open_prompt_with_input(PromptKind::Filter, None, typed);
+                    self.prompt_error("use ·project or #tag (none clears)");
+                    return;
+                };
+                self.filter = next;
+                self.follow_id = self.cursor_task().map(|t| t.id.clone());
+                self.refresh();
+                self.set_status(format!(
+                    "lens {} — esc clears",
+                    self.filter.as_ref().map(|f| f.chip()).unwrap_or_default()
+                ));
+            }
+            PromptKind::Tag => {
+                let Some(id) = prompt.target_id else {
+                    self.set_status("no task under cursor");
+                    return;
+                };
+                let input = prompt.input.trim();
+                let typed = prompt.input.clone();
+                if input.is_empty() {
+                    self.open_prompt_with_input(PromptKind::Tag, Some(id), typed);
+                    self.prompt_error("nothing to do (+add / −remove)");
+                    return;
+                }
+                let Ok(task) = self.store.get_task(&id) else {
+                    self.set_status("task not found");
+                    return;
+                };
+                let mut tags = task.tags.clone();
+                for tok in input.split_whitespace() {
+                    if let Some(name) = tok.strip_prefix('-') {
+                        tags.retain(|x| x != name);
+                    } else {
+                        let name = tok.strip_prefix('+').unwrap_or(tok);
+                        if !name.is_empty() && !tags.iter().any(|x| x == name) {
+                            tags.push(name.to_string());
+                        }
+                    }
+                }
+                self.apply_patch(
+                    &id,
+                    TaskPatch {
+                        tags: Patch::Set(tags),
+                        ..Default::default()
+                    },
+                    "tags updated",
+                );
+            }
             PromptKind::Search => {
                 let q = prompt.input.trim().to_string();
                 // refresh() records the (reset) cursor for this view; the
@@ -682,6 +814,42 @@ impl GuiState {
                     self.set_status("no task selected");
                 }
             }
+            "filter" => {
+                if rest.is_empty() {
+                    self.open_prompt(PromptKind::Filter, None);
+                } else {
+                    // Reuse the prompt commit path: build a fake commit by
+                    // opening and committing in one step is overkill — the
+                    // command form sets/clears directly.
+                    if is_clear_marker(rest) {
+                        if self.filter.is_some() {
+                            self.clear_lens();
+                        } else {
+                            self.set_status("no lens active");
+                        }
+                    } else {
+                        let next = if let Some(name) = rest.strip_prefix('·') {
+                            Some(Filter::Project(name.trim().to_string()))
+                        } else if let Some(name) = rest.strip_prefix('#') {
+                            Some(Filter::Tag(name.trim().to_string()))
+                        } else if let Some(name) = rest.strip_prefix('+') {
+                            Some(Filter::Tag(name.trim().to_string()))
+                        } else {
+                            Some(Filter::Project(rest.trim().to_string()))
+                        };
+                        match next {
+                            Some(f) => {
+                                let chip = f.chip();
+                                self.filter = Some(f);
+                                self.follow_id = self.cursor_task().map(|t| t.id.clone());
+                                self.refresh();
+                                self.set_status(format!("lens {chip} — esc clears"));
+                            }
+                            None => self.set_status("usage: :filter ·project|#tag|none"),
+                        }
+                    }
+                }
+            }
             "project" => {
                 if rest.is_empty() {
                     self.set_status("usage: :project <name|none>");
@@ -808,6 +976,7 @@ impl GuiState {
         "defer",
         "project",
         "tag",
+        "filter",
         "organize",
         "archive",
         "unarchive",
@@ -1030,6 +1199,37 @@ impl GuiState {
         self.set_status("");
     }
 
+    /// Sidebar activation (click): views switch, lenses toggle.
+    pub fn activate_sidebar(&mut self, item: SidebarItem) {
+        match item {
+            SidebarItem::View(v) => self.switch_view(v),
+            SidebarItem::Project(p) => self.toggle_lens(Filter::Project(p)),
+            SidebarItem::Tag(t) => self.toggle_lens(Filter::Tag(t)),
+        }
+    }
+
+    /// Re-selecting the active lens clears it; anything else replaces it.
+    fn toggle_lens(&mut self, f: Filter) {
+        if self.filter.as_ref() == Some(&f) {
+            self.clear_lens();
+        } else {
+            self.filter = Some(f);
+            self.follow_id = self.cursor_task().map(|t| t.id.clone());
+            self.refresh();
+            self.set_status(format!(
+                "lens {} — esc clears",
+                self.filter.as_ref().map(|f| f.chip()).unwrap_or_default()
+            ));
+        }
+    }
+
+    fn clear_lens(&mut self) {
+        self.filter = None;
+        self.follow_id = self.cursor_task().map(|t| t.id.clone());
+        self.refresh();
+        self.set_status("lens cleared");
+    }
+
     fn cycle_view(&mut self, forward: bool) {
         let order = [
             TaskView::Inbox,
@@ -1079,6 +1279,8 @@ impl GuiState {
                 self.follow_id = self.pre_search_task.take();
                 self.refresh();
                 self.set_status("search cleared");
+            } else if self.filter.is_some() {
+                self.clear_lens();
             } else {
                 self.set_status("");
             }
@@ -1363,7 +1565,7 @@ impl GuiState {
             Some(k) => k.chr(),
         };
         let Some(cmd) = cmd else {
-            self.set_status("leader: c d u r o D p space");
+            self.set_status("leader: c d u r o t f D p space");
             return;
         };
         let target = self
@@ -1377,6 +1579,8 @@ impl GuiState {
             'u' => self.open_prompt(PromptKind::Due, target),
             'r' => self.open_prompt(PromptKind::Remind, target),
             'o' => self.open_prompt(PromptKind::Organize, target),
+            't' => self.open_prompt(PromptKind::Tag, target),
+            'f' => self.open_prompt(PromptKind::Filter, None),
             'D' => {
                 if let Some(id) = target {
                     match ops::unarchive(&self.store, &id) {

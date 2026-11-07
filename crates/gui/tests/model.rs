@@ -406,6 +406,87 @@ fn shift_due_keys_and_repeat() {
 }
 
 #[test]
+fn filter_lens_narrows_and_persists_across_views() {
+    use intent_gui::model::Filter;
+    let mut f = fx();
+    let ids = seed(&mut f, &["inbox one", "work task"]);
+    intent_core::ops::organize(&f.state.store, &ids[0], Some("work")).unwrap();
+
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "all");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.rows.len(), 2);
+
+    // Lens on ·work: only the organized task remains, heading honesty is
+    // the renderer's job — here we assert the rows.
+    feed(&mut f, "<space> f");
+    assert!(f.state.prompt.is_some());
+    type_prompt_text(&mut f, "·work");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.filter, Some(Filter::Project("work".into())));
+    assert_eq!(f.state.rows.len(), 1);
+    assert_eq!(f.state.rows[0].id, ids[0]);
+
+    // The lens persists across view switches (it's a lens, not a view).
+    feed(&mut f, "1"); // inbox: the work task isn't there
+    assert!(f.state.rows.is_empty());
+    assert_eq!(f.state.filter, Some(Filter::Project("work".into())));
+
+    // esc clears.
+    feed(&mut f, "<esc>");
+    assert_eq!(f.state.filter, None);
+    assert_eq!(f.state.rows.len(), 1, "inbox one is back");
+}
+
+#[test]
+fn filter_prompt_rejects_unprefixed_input_and_clears_on_none() {
+    use intent_gui::model::Filter;
+    let mut f = fx();
+    seed(&mut f, &["one"]);
+
+    feed(&mut f, "<space> f");
+    type_prompt_text(&mut f, "work");
+    feed(&mut f, "<cr>");
+    assert!(f.state.prompt.is_some(), "unprefixed input reopens");
+    assert!(f.state.prompt.as_ref().unwrap().error.is_some());
+    feed(&mut f, "<esc>");
+
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "filter ·work");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.filter, Some(Filter::Project("work".into())));
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "filter none");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.filter, None);
+}
+
+#[test]
+fn space_t_prompt_adds_and_removes_tags_undoably() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["tagged"]);
+
+    feed(&mut f, "<space> t");
+    assert!(f.state.prompt.is_some());
+    type_prompt_text(&mut f, "+trip urgent");
+    feed(&mut f, "<cr>");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.tags, vec!["trip".to_string(), "urgent".to_string()]);
+    assert!(t.inbox, "tags never clear the inbox");
+
+    feed(&mut f, "<space> t");
+    type_prompt_text(&mut f, "-trip");
+    feed(&mut f, "<cr>");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.tags, vec!["urgent".to_string()]);
+
+    // Tag edits are task operations: session-undoable.
+    feed(&mut f, "u");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.tags, vec!["trip".to_string(), "urgent".to_string()]);
+}
+
+#[test]
 fn shift_keys_move_the_snooze_of_a_deferred_task() {
     // SPEC §4.1: a snoozed task is parked on its defer date; `>`/`<` move
     // the snooze, not the deadline underneath it.

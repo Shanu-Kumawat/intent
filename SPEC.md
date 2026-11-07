@@ -237,10 +237,15 @@ One window. Three surfaces; exactly one receives keys at any time.
 │ 2 TO │    …                                            │  list
 │ 3 UP │    …                                            │
 │ 4 DN │                                                 │
+│5 ARC │                                                 │
+│PROJ  │                                                 │  sidebar:
+│·work │                                                 │  views, then
+│TAGS  │                                                 │  projects/tags
+│#trip │                                                 │  (lens toggles)
 ├──────┴───────────────────────────────────────────────┤
 │ :defer +3d_                                          │  prompt (when active)
 ├──────────────────────────────────────────────────────┤
-│ -- NORMAL --  k3x9qa  3/12                            │  status line
+│ -- NORMAL --  k3x9qa  3/12  ·work                    │  status line
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -292,6 +297,8 @@ Pending state is always visible, so waiting is safe.
 | `space u`          | due prompt → sets `due`                                        |
 | `space r`          | remind prompt → sets `remind`                                 |
 | `space o`          | organize prompt → sets `project` (empty answer = just leave inbox) |
+| `space t`          | tag prompt → `+add`/`−remove` tokens (§4.3); undoable |
+| `space f`          | filter prompt → project/tag lens (§4.3); the sidebar lists projects and tags with counts — clicking one toggles its lens |
 | `esc`              | cancel pending sequence / visual / search results              |
 
 `space` is **always** the leader, on every surface, in every mode (in the
@@ -351,9 +358,19 @@ between fields, consistent with its "advance" role in the list.
 One-line, insert-like: printable ASCII, `backspace`, `ctrl-w`, `ctrl-u`,
 `ctrl-v` (paste system clipboard), `enter` commits, `escape` cancels and
 restores the interrupted surface exactly. Prompts show a title
-(`CAPTURE:`, `DEFER:`, `DUE:`, `REMIND:`, `ORGANIZE project:`, `/`, `:`) and
-a hint line where useful. Invalid values (e.g. bad date) keep the prompt
-open with an error message — focus never bounces on bad input.
+(`CAPTURE:`, `DEFER:`, `DUE:`, `REMIND:`, `ORGANIZE project:`, `FILTER:`,
+`TAG:`, `/`, `:`) and a hint line where useful. Invalid values (e.g. bad
+date) keep the prompt open with an error message — focus never bounces on
+bad input.
+
+- `FILTER` — `·project` or `#tag` applies a **lens** (§4.1): the rows of the
+  current view narrow to that project/tag. The lens persists across view
+  switches, shows in the heading and status bar, and is cleared by `esc`,
+  `none`/`-`, or re-selecting it in the sidebar. Search wins while active;
+  the lens resumes when the search clears. An empty lens result shows `0`
+  honestly — a lens never claims to be a view.
+- `TAG` — whitespace-separated tokens: `+name`/`name` adds, `-name` removes.
+  Tag edits never clear the inbox and are session-undoable (§5).
 
 ### 4.4 Command prompt (`:`)
 
@@ -365,6 +382,7 @@ command (no cursor task, empty list) is an error message, not a crash.
 :new [title] / :capture [title]        capture (empty title → capture prompt)
 :due <date|none>    :remind <date|none>    :defer <date|none>
 :project <name|none>  :tag +tag  :tag -tag
+:filter <·project|#tag|none>   apply/clear the lens (§4.3)
 :organize           leave inbox (no project change)
 :archive :unarchive :done :reopen
 :delete             same as D (y/n confirm)
