@@ -1334,6 +1334,50 @@ fn empty_date_input_is_an_error_not_a_clear() {
 // ---- capture focus + SPC SPC (help keymap regressions) ---------------------
 
 #[test]
+fn capture_under_lens_reports_when_the_lens_hides_it() {
+    use intent_gui::model::Filter;
+    let mut f = fx();
+    seed(&mut f, &["one"]);
+    intent_core::ops::edit(
+        &f.state.store,
+        // organize "one" into work: both tasks out of the plain capture flow
+        &f.state.rows[0].id,
+        &intent_core::model::TaskPatch {
+            project: intent_core::model::Patch::Set("work".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Lens on ·work, then capture: the new task has no project, so the
+    // lens hides it — the status must say so, not just "captured".
+    f.state.filter = Some(Filter::Project("work".into()));
+    f.state.refresh();
+    assert!(f.state.rows.is_empty());
+
+    feed(&mut f, "<space> <space>");
+    type_prompt_text(&mut f, "lens probe");
+    feed(&mut f, "<cr>");
+    let status = f.state.status.clone();
+    assert!(
+        status.contains("not in lens ·work"),
+        "status hints the lens: {status}"
+    );
+
+    // A capture that the lens can show keeps the plain message.
+    feed(&mut f, "<esc>"); // clear the lens
+    assert_eq!(f.state.rows.len(), 1, "the capture is back in view");
+    feed(&mut f, "<space> <space>");
+    type_prompt_text(&mut f, "second");
+    feed(&mut f, "<cr>");
+    assert!(
+        f.state.status.starts_with("captured "),
+        "plain message when visible: {}",
+        f.state.status
+    );
+}
+
+#[test]
 fn space_space_opens_capture() {
     let mut f = fx();
     seed(&mut f, &["a"]);

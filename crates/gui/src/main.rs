@@ -321,12 +321,12 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
     // to clear) toggles a lens over the current view; the busiest six are
     // listed so the sidebar stays a fixed, scannable height.
     col = col.child(sidebar_section_header("PROJECTS"));
-    for (name, count) in state.projects.iter().take(6) {
+    for (ix, (name, count)) in state.projects.iter().take(6).enumerate() {
         let active = state.filter.as_ref() == Some(&Filter::Project(name.clone()));
         col = col.child(lens_row(
             state,
             cx,
-            "p",
+            &format!("p{ix}"),
             &format!("·{name}"),
             SidebarItem::Project(name.clone()),
             *count,
@@ -334,12 +334,12 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
         ));
     }
     col = col.child(sidebar_section_header("TAGS"));
-    for (name, count) in state.tags.iter().take(6) {
+    for (ix, (name, count)) in state.tags.iter().take(6).enumerate() {
         let active = state.filter.as_ref() == Some(&Filter::Tag(name.clone()));
         col = col.child(lens_row(
             state,
             cx,
-            "t",
+            &format!("t{ix}"),
             &format!("#{name}"),
             SidebarItem::Tag(name.clone()),
             *count,
@@ -372,7 +372,10 @@ fn lens_row(
     active: bool,
 ) -> gpui::Stateful<gpui::Div> {
     let mut row = div()
-        .id(SharedString::from(format!("sb-{ns}-{}", item_key(&item))))
+        // Positional id: project/tag NAMES can collide after any mangling
+        // (`!!` and `??` both sanitize to ""), so the id encodes the slot,
+        // never the name.
+        .id(SharedString::from(format!("sb-{ns}")))
         .flex()
         .justify_between()
         .px(px(S4))
@@ -389,16 +392,6 @@ fn lens_row(
             .font_weight(gpui::FontWeight::BOLD);
     }
     row.child(label.to_string()).child(format!("{count}"))
-}
-
-/// Stable element id for a lens row (names may contain odd characters).
-fn item_key(item: &SidebarItem) -> String {
-    match item {
-        SidebarItem::View(v) => v.as_str().to_string(),
-        SidebarItem::Project(p) | SidebarItem::Tag(p) => {
-            p.chars().filter(|c| c.is_alphanumeric()).collect()
-        }
-    }
 }
 
 fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {

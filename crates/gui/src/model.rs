@@ -507,15 +507,14 @@ impl GuiState {
                         if let Some(change) = &out.change {
                             self.push_undo_from(vec![change.clone()]);
                         }
-                        self.set_status(format!("captured {}", task.id));
+                        self.refresh();
+                        self.captured_status(&task.id);
                     }
                     Err(e) => {
                         self.open_prompt_with_input(PromptKind::Capture, None, typed);
                         self.prompt_error(&e.to_string());
-                        return;
                     }
                 }
-                self.refresh();
             }
             PromptKind::Defer | PromptKind::Due | PromptKind::Remind => {
                 let id = match prompt.target_id {
@@ -770,11 +769,11 @@ impl GuiState {
                         Ok(out) => {
                             let t = out.task.unwrap();
                             self.follow_id = Some(t.id.clone());
-                            self.set_status(format!("captured {}", t.id));
                             if let Some(change) = &out.change {
                                 self.push_undo_from(vec![change.clone()]);
                             }
                             self.refresh();
+                            self.captured_status(&t.id);
                         }
                         Err(e) => self.set_status(e.to_string()),
                     }
@@ -1228,6 +1227,18 @@ impl GuiState {
         self.follow_id = self.cursor_task().map(|t| t.id.clone());
         self.refresh();
         self.set_status("lens cleared");
+    }
+
+    /// Capture feedback. A capture the active lens hides must never look
+    /// lost — the status names the lens instead of silently showing
+    /// nothing (§4.1).
+    fn captured_status(&mut self, id: &str) {
+        match &self.filter {
+            Some(f) if self.rows.iter().all(|t| t.id != id) => {
+                self.set_status(format!("captured {id} — not in lens {}", f.chip()));
+            }
+            _ => self.set_status(format!("captured {id}")),
+        }
     }
 
     fn cycle_view(&mut self, forward: bool) {
