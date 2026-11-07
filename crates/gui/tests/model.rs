@@ -325,15 +325,8 @@ fn leader_defer_due_remind_prompts() {
     let today = f.state.today;
 
     // Inbox is newest-first: the cursor is on ids[1] ("date me").
-    feed(&mut f, "<space> d");
+    feed(&mut f, "<space> u");
     assert!(f.state.prompt.is_some());
-    type_prompt_text(&mut f, "+3d");
-    feed(&mut f, "<cr>");
-    let t = f.state.store.get_task(&ids[1]).unwrap();
-    assert_eq!(t.defer_until, Some(today.add_days(3)));
-    assert!(t.inbox, "deferring alone does not organize");
-
-    feed(&mut f, "<space> u"); // still on ids[1]
     type_prompt_text(&mut f, "tomorrow");
     feed(&mut f, "<cr>");
     let t = f.state.store.get_task(&ids[1]).unwrap();
@@ -341,6 +334,7 @@ fn leader_defer_due_remind_prompts() {
     assert!(!t.inbox, "setting due organizes out of inbox");
     // ids[1] left the inbox; the cursor drops to ids[0] ("defer me")
 
+    // Bad date keeps the prompt open (target: ids[0] under the cursor).
     feed(&mut f, "<space> r");
     type_prompt_text(&mut f, "not a date at all");
     feed(&mut f, "<cr>");
@@ -348,6 +342,19 @@ fn leader_defer_due_remind_prompts() {
     assert!(f.state.prompt.as_ref().unwrap().error.is_some());
     feed(&mut f, "<esc>");
     assert!(f.state.prompt.is_none());
+
+    // Defer is a snooze: the task leaves the Inbox view but the data flag
+    // stays (SPEC §1.2 — defer never organizes).
+    feed(&mut f, "<space> d");
+    type_prompt_text(&mut f, "+3d");
+    feed(&mut f, "<cr>");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.defer_until, Some(today.add_days(3)));
+    assert!(t.inbox, "deferring alone does not organize");
+    assert!(
+        f.state.rows.is_empty(),
+        "snoozed task leaves the Inbox view"
+    );
 }
 
 #[test]
@@ -381,6 +388,41 @@ fn shift_due_keys_and_repeat() {
     // . repeats the last op (the -1 shift)
     feed(&mut f, ".");
     assert_eq!(f.state.store.get_task(&ids[0]).unwrap().due, Some(today));
+}
+
+#[test]
+fn shift_keys_move_the_snooze_of_a_deferred_task() {
+    // SPEC §4.1: a snoozed task is parked on its defer date; `>`/`<` move
+    // the snooze, not the deadline underneath it.
+    let mut f = fx();
+    let ids = seed(&mut f, &["snoozed"]);
+    let today = f.state.today;
+    intent_core::ops::edit(
+        &f.state.store,
+        &ids[0],
+        &intent_core::model::TaskPatch {
+            due: intent_core::model::Patch::Set(today),
+            defer_until: intent_core::model::Patch::Set(today.add_days(2)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Snoozed: parked in Upcoming (not Today despite the due date).
+    feed(&mut f, "3");
+    assert_eq!(f.state.rows.len(), 1);
+    feed(&mut f, ">");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.defer_until, Some(today.add_days(3)), "defer shifted");
+    assert_eq!(t.due, Some(today), "due untouched");
+    feed(&mut f, "<");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.defer_until, Some(today.add_days(2)));
+    feed(&mut f, ".");
+    assert_eq!(
+        f.state.store.get_task(&ids[0]).unwrap().defer_until,
+        Some(today.add_days(1))
+    );
 }
 
 #[test]

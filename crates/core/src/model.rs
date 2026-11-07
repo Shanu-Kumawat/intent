@@ -213,18 +213,24 @@ impl serde::Serialize for Task {
 }
 
 impl Task {
-    pub fn is_due_or_reminding(&self, today: Date) -> bool {
-        if self.status != Status::Active {
+    /// A snoozed task is hidden from Inbox and Today until its defer date
+    /// (SPEC §1.3); it parks in Upcoming in the meantime.
+    pub fn is_snoozed(&self, today: Date) -> bool {
+        self.status == Status::Active && self.defer_until.is_some_and(|d| d > today)
+    }
+
+    /// The Today predicate (SPEC §1.3): the task demands attention today —
+    /// a `due` or `remind` date that has arrived, or a pure-deferred task
+    /// whose snooze has lifted (defer = "see this again on the date").
+    /// Snoozed tasks are never in Today.
+    pub fn in_today(&self, today: Date) -> bool {
+        if self.status != Status::Active || self.is_snoozed(today) {
             return false;
-        }
-        if let Some(d) = self.defer_until {
-            if d > today {
-                return false;
-            }
         }
         let due_hit = self.due.map(|d| d <= today).unwrap_or(false);
         let remind_hit = self.remind.map(|r| r <= today).unwrap_or(false);
-        due_hit || remind_hit
+        let resurfaced = self.due.is_none() && self.remind.is_none() && self.defer_until.is_some();
+        due_hit || remind_hit || resurfaced
     }
 }
 

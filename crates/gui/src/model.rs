@@ -498,7 +498,21 @@ impl GuiState {
                     Some(d) => Patch::Set(d),
                     None => Patch::Clear,
                 };
-                self.apply_patch(&id, patch, "date updated");
+                if prompt.kind == PromptKind::Defer {
+                    // SPEC §1.3: snooze now, park in Upcoming, land in
+                    // Today on the date.
+                    match value {
+                        None => self.apply_patch(&id, patch, "defer cleared"),
+                        Some(d) if d > self.today => self.apply_patch(
+                            &id,
+                            patch,
+                            &format!("deferred → {d} · parked in Upcoming"),
+                        ),
+                        Some(_) => self.apply_patch(&id, patch, "defer lifted · back in Today"),
+                    }
+                } else {
+                    self.apply_patch(&id, patch, "date updated");
+                }
             }
             PromptKind::Organize => {
                 let id = match prompt.target_id {
@@ -1543,6 +1557,19 @@ impl GuiState {
             self.set_status("no task under cursor");
             return;
         };
+        // A snoozed task is parked on its defer date; `>`/`<` move the
+        // snooze, not the deadline underneath it (SPEC §4.1).
+        if task.is_snoozed(self.today) {
+            if let Some(d) = task.defer_until {
+                let patch = TaskPatch {
+                    defer_until: Patch::Set(d.add_days(delta * count as i64)),
+                    ..Default::default()
+                };
+                self.apply_patch(&task.id, patch, "defer date shifted");
+                self.last_op = Some(Repeatable::ShiftDue { delta, n: count });
+            }
+            return;
+        }
         let new_due = match task.due {
             Some(d) => Some(d.add_days(delta * count as i64)),
             None if delta > 0 => Some(self.today),

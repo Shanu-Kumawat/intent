@@ -9,10 +9,13 @@ pub fn for_view(tasks: &[Task], view: TaskView, today: Date) -> Vec<Task> {
     let mut out: Vec<Task> = tasks
         .iter()
         .filter(|t| match view {
-            TaskView::Inbox => t.status == Status::Active && t.inbox,
-            TaskView::Today => t.is_due_or_reminding(today),
+            // Snoozed tasks leave the triage list; the inbox flag itself is
+            // untouched (SPEC §1.2 — defer never organizes).
+            TaskView::Inbox => t.status == Status::Active && t.inbox && !t.is_snoozed(today),
+            TaskView::Today => t.in_today(today),
             TaskView::Upcoming => {
-                t.status == Status::Active && !t.inbox && !t.is_due_or_reminding(today)
+                t.status == Status::Active
+                    && (t.is_snoozed(today) || (!t.inbox && !t.in_today(today)))
             }
             TaskView::Completed => t.status == Status::Done,
             TaskView::Archived => t.status == Status::Archived,
@@ -291,6 +294,118 @@ mod tests {
 
         let all = for_view(&tasks, TaskView::All, t);
         assert_eq!(all.len(), tasks.len() - 1, "all excludes only archived");
+    }
+
+    #[test]
+    fn snoozed_inbox_task_leaves_triage_and_parks_in_upcoming() {
+        let s = Store::open_memory().unwrap();
+        let t = ops::add(
+            &s,
+            NewTask {
+                title: "later".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .task
+        .unwrap();
+        assert!(t.inbox);
+        let _ = ops::defer(&s, &t.id, Some(Date(date(2026, 11, 1))));
+        let tasks = s.all_tasks().unwrap();
+        let today = today();
+
+        let inbox = for_view(&tasks, TaskView::Inbox, today);
+        assert!(
+            !inbox.iter().any(|x| x.id == t.id),
+            "snoozed task hides from the Inbox view"
+        );
+        let upcoming = for_view(&tasks, TaskView::Upcoming, today);
+        assert!(
+            upcoming.iter().any(|x| x.id == t.id),
+            "snoozed task parks in Upcoming"
+        );
+        // The data flag is untouched — defer never organizes (§1.2).
+        assert!(tasks.iter().find(|x| x.id == t.id).unwrap().inbox);
+    }
+
+    #[test]
+    fn pure_deferred_task_resurfaces_in_today() {
+        let s = Store::open_memory().unwrap();
+        let t = ops::add(
+            &s,
+            NewTask {
+                title: "snoozed plain".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .task
+        .unwrap();
+        let _ = ops::defer(&s, &t.id, Some(Date(date(2026, 11, 1))));
+        let tasks = s.all_tasks().unwrap();
+
+        let before = for_view(&tasks, TaskView::Today, today());
+        assert!(!before.iter().any(|x| x.id == t.id));
+        assert!(for_view(&tasks, TaskView::Inbox, today())
+            .iter()
+            .all(|x| x.id != t.id));
+
+        let on_date = for_view(&tasks, TaskView::Today, Date(date(2026, 11, 1)));
+        assert!(
+            on_date.iter().any(|x| x.id == t.id),
+            "pure-deferred task lands in Today on the defer date"
+        );
+        let after = for_view(&tasks, TaskView::Today, Date(date(2026, 11, 9)));
+        assert!(after.iter().any(|x| x.id == t.id), "and stays there");
+    }
+
+    #[test]
+    fn dated_deferred_task_returns_to_today_after_snooze() {
+        let s = Store::open_memory().unwrap();
+        let t = ops::add(
+            &s,
+            NewTask {
+                title: "overdue but snoozed".into(),
+                due: Some(Date(date(2026, 10, 20))),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .task
+        .unwrap();
+        let _ = ops::defer(&s, &t.id, Some(Date(date(2026, 11, 1))));
+        let tasks = s.all_tasks().unwrap();
+
+        assert!(!for_view(&tasks, TaskView::Today, today())
+            .iter()
+            .any(|x| x.id == t.id));
+        assert!(for_view(&tasks, TaskView::Today, Date(date(2026, 11, 1)))
+            .iter()
+            .any(|x| x.id == t.id));
+    }
+
+    #[test]
+    fn re_defer_hides_resurfaced_task_again() {
+        let s = Store::open_memory().unwrap();
+        let t = ops::add(
+            &s,
+            NewTask {
+                title: "not yet".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .task
+        .unwrap();
+        let _ = ops::defer(&s, &t.id, Some(Date(date(2026, 11, 1))));
+        let _ = ops::defer(&s, &t.id, Some(Date(date(2026, 12, 1))));
+        let tasks = s.all_tasks().unwrap();
+        assert!(!for_view(&tasks, TaskView::Today, Date(date(2026, 11, 1)))
+            .iter()
+            .any(|x| x.id == t.id));
+        assert!(for_view(&tasks, TaskView::Today, Date(date(2026, 12, 1)))
+            .iter()
+            .any(|x| x.id == t.id));
     }
 
     #[test]

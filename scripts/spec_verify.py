@@ -98,10 +98,32 @@ check("all = everything except archived", "§1.3",
 check("`list` with no arg defaults to all", "§3",
       {x["title"] for x in jrun("list","--json")[1]}==tall)
 
-# sort: today due-ascending (due today < remind today has due? remind-only sorts by remind)
+# ---------- §1.3: defer is a snooze ----------
+c, t, _ = jrun("add", "snoozed inbox", "--json"); sn1 = t["id"]
+jrun("defer", sn1, "+3d")
+code, t, _ = jrun("show", sn1, "--json")
+check("defer does NOT clear the inbox flag", "§1.2/§1.3", t["inbox"] is True)
+ti = titles("inbox")
+check("snoozed task hides from the inbox view", "§1.3", "snoozed inbox" not in ti, str(ti))
+tt = titles("today")
+check("snoozed task not in today", "§1.3", "snoozed inbox" not in tt, str(tt))
+tu = titles("upcoming")
+check("snoozed task parks in upcoming", "§1.3", "snoozed inbox" in tu, str(tu))
+c, t, _ = jrun("add", "resurface plain", "--json"); sn2 = t["id"]
+jrun("defer", sn2, "today")
+check("pure-deferred task resurfaces in today on the date", "§1.3",
+      "resurface plain" in titles("today"), str(titles("today")))
+c, t, _ = jrun("add", "snooze lifted", "--json"); sn3 = t["id"]
+jrun("edit", sn3, "--due", "yesterday")
+jrun("defer", sn3, "yesterday")
+check("past-due task returns to today once its snooze lifts", "§1.3",
+      "snooze lifted" in titles("today"), str(titles("today")))
+
+# sort: today due-ascending; resurfaced pure-deferred (undated) sorts last
 today_list = jrun("list", "today", "--json")[1]
 check("today sorted dated-first ascending", "§1.3",
-      [x["title"] for x in today_list]==["due today","remind today"],
+      [x["title"] for x in today_list]
+      ==["snooze lifted","due today","remind today","resurface plain"],
       str([x["title"] for x in today_list]))
 
 # ---------- §1.4: date grammar ----------

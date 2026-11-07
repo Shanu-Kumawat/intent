@@ -34,7 +34,7 @@ A **task** is the only entity.
 | `tags`        | [string]            | Free-form labels                                     |
 | `due`         | date, optional      | **Deadline** — hard commitment                       |
 | `remind`      | date, optional      | **Resurface** — "look at this again on", soft       |
-| `defer_until` | date, optional      | Hide from Today until this date                     |
+| `defer_until` | date, optional      | **Snooze** — hide from Inbox and Today until this date (§1.3) |
 | `created_at`  | timestamp (UTC)     |                                                     |
 | `updated_at`  | timestamp (UTC)     | Bumped by every mutation                             |
 | `completed_at`| timestamp, optional | Set when status becomes `done`                       |
@@ -57,7 +57,9 @@ Dates are **local calendar dates** (`YYYY-MM-DD`). Timestamps are RFC 3339 UTC.
 - `done` = completed. Keeps `completed_at`. Reversible (`reopen`).
 - `archived` = out of mind, kept for the record. Reversible (`unarchive`).
 - **Deferral is not a status.** It is the `defer_until` date; a deferred task
-  is still `active`.
+  is still `active`. While `defer_until` is in the future the task is
+  **snoozed**: it appears in no working view (it parks in Upcoming, §1.3) and
+  lands in Today on the date — defer means "see this again on".
 
 ### 1.2 Inbox semantics
 
@@ -69,17 +71,22 @@ in the Inbox view. A task **leaves the inbox** when any of these happen:
 - `remind` is set,
 - an explicit organize action runs (`intent organize`, `Space o`, `:organize`).
 
-Priority, tags, notes, and title edits do **not** clear the inbox.
+Priority, tags, notes, and title edits do **not** clear the inbox. Deferral
+does not clear it either — but while a task is snoozed it does not appear in
+the Inbox *view* (§1.3); the `inbox` flag itself is untouched.
 
 ### 1.3 Views
 
-`today` means the local calendar date at evaluation time.
+`today` means the local calendar date at evaluation time. A task is
+**snoozed** while `defer_until > today` (active tasks only). Snoozed tasks
+are visible in exactly one working view — Upcoming — and land in Today when
+the date arrives.
 
 | View        | Definition (in precedence order)                                                                 |
 |-------------|--------------------------------------------------------------------------------------------------|
-| `inbox`     | `status = active AND inbox`                                                                       |
-| `today`     | `status = active AND (defer_until IS NULL OR defer_until ≤ today) AND (due ≤ today OR remind ≤ today)` |
-| `upcoming`  | `status = active AND NOT inbox AND not in today` — future-dated and undated ("someday") tasks     |
+| `inbox`     | `status = active AND inbox AND NOT snoozed`                                                       |
+| `today`     | `status = active AND NOT snoozed AND (due ≤ today OR remind ≤ today OR (due IS NULL AND remind IS NULL AND defer_until IS NOT NULL))` — the last clause is a pure-deferred task resurfacing |
+| `upcoming`  | `status = active AND (snoozed OR (NOT inbox AND not in today))` — snoozed tasks (whatever their inbox state), future-dated and undated ("someday") tasks |
 | `completed` | `status = done`, newest `completed_at` first                                                      |
 | `archived`  | `status = archived`, newest `updated_at` first                                                    |
 | `all`       | `status != archived` (CLI default; nothing is ever invisible from the CLI)                        |
@@ -266,7 +273,7 @@ Pending state is always visible, so waiting is safe.
 | `d`                | archive (count ok)                                             |
 | `space D`          | unarchive                                                     |
 | `D`                | delete permanently — two-stroke: the first `D` arms the row (it turns red, the app's only non-monochrome accent), a second `D` on the same row deletes; `esc`, moving, or any other key disarms. Session-undoable |
-| `>` / `<`          | shift due +1/−1 day; if no due, `>` sets due = today (count ok)|
+| `>` / `<`          | shift due +1/−1 day; if no due, `>` sets due = today (count ok). For a snoozed task the snooze moves instead of the deadline underneath it. |
 | `+` `=` / `-`      | raise / lower priority (cycle none↔low↔medium↔high; count ok)  |
 | `y` / `Y`          | yank title / title+notes to system clipboard                   |
 | `V`                | VISUAL (line-wise): `j`/`k` extend; `x` complete all, `d` archive all, `y` yank titles (newline-joined), `esc` cancel |
@@ -277,7 +284,7 @@ Pending state is always visible, so waiting is safe.
 | `tab` / `shift-tab`| next / previous view                                           |
 | `u` / `ctrl-r`     | undo / redo task operations (§5)                               |
 | `.`                | repeat last task operation (`x d > < + -` are repeatable), count replaces the original count |
-| `space d`          | defer prompt → sets `defer_until` (§1.4 syntax)                |
+| `space d`          | defer prompt → sets `defer_until` (§1.4 syntax); the task is snoozed until the date (§1.3) |
 | `space u`          | due prompt → sets `due`                                        |
 | `space r`          | remind prompt → sets `remind`                                 |
 | `space o`          | organize prompt → sets `project` (empty answer = just leave inbox) |

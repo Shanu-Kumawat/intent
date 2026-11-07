@@ -351,7 +351,10 @@ fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {
     if let Some(r) = task.remind {
         meta.push(format!("remind {r}"));
     }
-    if let Some(d) = task.defer_until {
+    // Show the defer chip only while it's holding the task out of your
+    // way; once the date passes the task resurfaces in Today and the
+    // stale chip is noise (SPEC §1.3).
+    if let Some(d) = task.defer_until.filter(|d| *d > state.today) {
         meta.push(format!("defer {d}"));
     }
     if let Some(p) = &task.project {
