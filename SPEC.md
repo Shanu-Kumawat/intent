@@ -202,8 +202,12 @@ intent prioritize ID none|low|medium|high [--json]
 intent archive ID [--json]       intent unarchive ID [--json]
 intent organize ID [--project P] [--json]
 intent delete ID [--force] [--json]       (see §3.1)
-intent search QUERY [--json] [--limit N]  (= list --query, all non-archived)
+intent search QUERY [--json] [--limit N]  (= list --query, all non-archived;
+    terms also match the task id, so `intent search abc123` finds it directly)
 intent counts [--json]                    (view → count map)
+intent projects [--json]                  (distinct projects + non-archived counts,
+                                           busiest first — archived never tallies)
+intent tags [--json]                      (same, for tags)
 intent completions bash|zsh|fish          (print a completion script; no db access)
 intent help [COMMAND] | --help | --version
 ```
@@ -277,7 +281,7 @@ Pending state is always visible, so waiting is safe.
 | `+` `=` / `-`      | raise / lower priority (cycle none↔low↔medium↔high; count ok)  |
 | `y` / `Y`          | yank title / title+notes to system clipboard                   |
 | `V`                | VISUAL (line-wise): `j`/`k` extend; `x` complete all, `d` archive all, `y` yank titles (newline-joined), `esc` cancel |
-| `/`                | search prompt; enter → the list keeps showing every non-archived task, non-matching titles dim, and the cursor jumps to the first match (title/notes/project/tags, all ANDed terms, case-insensitive); `n`/`N` cycle matches forward/backward with wrap; `esc` clears back to the previous view and cursor |
+| `/`                | search prompt; enter → the list keeps showing every non-archived task, non-matching titles dim, and the cursor jumps to the first match (id/title/notes/project/tags, all ANDed terms, case-insensitive — so `/abc123` lands on the task); `n`/`N` cycle matches forward/backward with wrap; `esc` clears back to the previous view and cursor |
 | `:`                | command prompt (§4.4)                                          |
 | `?`                | help overlay (full keymap; any key closes)                    |
 | `1`–`4`, `alt+1`–`alt+5` | switch view inbox/today/upcoming/completed; `alt+5` = archived (bare digits only with no pending count; bare `5`–`9` start counts, so archived has no bare key — `5gg` is the smallest count-gg) |

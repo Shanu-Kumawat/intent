@@ -131,10 +131,17 @@ Permanently delete. Asks y/N on a TTY; refuses without
 in non-interactive mode.
 .TP
 .BI "intent search " QUERY
-ANDed case-insensitive terms over title/notes/project/tags; archived excluded.
+ANDed case-insensitive terms over id/title/notes/project/tags; archived
+excluded. Searching the id finds the task directly.
 .TP
 .B intent counts
 Per-view task counts.
+.TP
+.B intent projects
+Distinct projects with non-archived task counts, busiest first.
+.TP
+.B intent tags
+Distinct tags with non-archived task counts, busiest first.
 .TP
 .BI "intent completions " SHELL
 Print a completion script for

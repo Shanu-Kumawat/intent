@@ -143,6 +143,10 @@ enum Cmd {
     },
     /// Per-view task counts
     Counts,
+    /// List distinct projects with task counts (busiest first)
+    Projects,
+    /// List distinct tags with task counts (busiest first)
+    Tags,
     /// Emit a shell completion script (bash, zsh, or fish) on stdout
     Completions {
         /// Shell to generate completions for

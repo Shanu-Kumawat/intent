@@ -179,6 +179,19 @@ c,out,_ = run("add", "findme please", "--json"); sid=json.loads(out)["id"]
 run("archive", sid)
 c,hits,_ = jrun("search", "findme", "--json")
 check("search excludes archived", "§3", len(hits)==0)
+# search matches the id
+c,out,_ = run("add", "id probe", "--json"); pid=json.loads(out)["id"]
+c,hits,_ = jrun("search", pid, "--json")
+check("search matches the task id", "§3", len(hits)==1 and hits[0]["id"]==pid, str(hits))
+# projects / tags enumeration
+c, projs, _ = jrun("projects", "--json")
+c2, tgs, _ = jrun("tags", "--json")
+check("projects --json: name+count list, busiest first", "§3",
+      c==0 and c2==0 and isinstance(projs, list)
+      and all(set(x)=={"name","count"} for x in projs)
+      and all(projs[i]["count"]>=projs[i+1]["count"] for i in range(len(projs)-1)),
+      str(projs))
+check("tags --json: name+count list", "§3", isinstance(tgs, list), str(tgs))
 
 # ---------- §3: counts + machine surfaces ----------
 c, cnt, _ = jrun("counts", "--json")

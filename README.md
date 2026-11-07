@@ -67,6 +67,8 @@ intent edit <id> --due friday --project admin
 intent list today
 intent done <id>
 intent search passport --json         # machine-readable output for agents
+intent projects --json                # distinct projects + counts
+intent tags --json                    # distinct tags + counts
 ```
 
 **GUI:**

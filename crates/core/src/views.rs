@@ -72,8 +72,9 @@ fn upcoming_key(t: &Task, _today: Date) -> (u8, Date, u8) {
     }
 }
 
-/// Case-insensitive AND-terms search over title, notes, project, and tags
-/// (SPEC §4.1 `/`). Archived excluded unless asked.
+/// Case-insensitive AND-terms search over id, title, notes, project, and
+/// tags (SPEC §4.1 `/` — the id line makes `/abc123` find a task directly).
+/// Archived excluded unless asked.
 pub fn search(tasks: &[Task], query: &str, include_archived: bool) -> Vec<Task> {
     let terms: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
     if terms.is_empty() {
@@ -84,7 +85,8 @@ pub fn search(tasks: &[Task], query: &str, include_archived: bool) -> Vec<Task> 
         .filter(|t| include_archived || t.status != Status::Archived)
         .filter(|t| {
             let hay = format!(
-                "{}\n{}\n{}\n{}",
+                "{}\n{}\n{}\n{}\n{}",
+                t.id,
                 t.title,
                 t.notes,
                 t.project.as_deref().unwrap_or(""),
@@ -136,7 +138,8 @@ impl ListFilter {
             } else {
                 out.retain(|t| {
                     let hay = format!(
-                        "{}\n{}\n{}\n{}",
+                        "{}\n{}\n{}\n{}\n{}",
+                        t.id,
                         t.title,
                         t.notes,
                         t.project.as_deref().unwrap_or(""),
@@ -160,6 +163,30 @@ pub fn counts(tasks: &[Task], today: Date) -> Vec<(TaskView, usize)> {
         .iter()
         .map(|v| (*v, for_view(tasks, *v, today).len()))
         .collect()
+}
+
+fn enumerate_by(tasks: &[Task], keys: impl Fn(&Task) -> Vec<String>) -> Vec<(String, usize)> {
+    // Archived tasks are out of mind (§1.1) — they don't organize anything.
+    let mut tally: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for t in tasks.iter().filter(|t| t.status != Status::Archived) {
+        for name in keys(t) {
+            *tally.entry(name).or_default() += 1;
+        }
+    }
+    let mut out: Vec<(String, usize)> = tally.into_iter().collect();
+    // Busiest first, then alphabetical — stable and scannable.
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
+}
+
+/// Distinct projects over non-archived tasks, busiest first (sidebar, CLI).
+pub fn projects(tasks: &[Task]) -> Vec<(String, usize)> {
+    enumerate_by(tasks, |t| t.project.clone().into_iter().collect())
+}
+
+/// Distinct tags over non-archived tasks, busiest first (sidebar, CLI).
+pub fn tags(tasks: &[Task]) -> Vec<(String, usize)> {
+    enumerate_by(tasks, |t| t.tags.clone())
 }
 
 /// Load all tasks and compute a view.
@@ -457,6 +484,68 @@ mod tests {
         }
         .apply(for_view(&tasks, TaskView::All, today()));
         assert_eq!(f.len(), 2);
+    }
+
+    #[test]
+    fn projects_and_tags_enumerate_non_archived_busiest_first() {
+        let s = Store::open_memory().unwrap();
+        let seed = |n: NewTask| ops::add(&s, n).unwrap().task.unwrap();
+        // 2 in "work", 1 in "home"; "trip" tagged twice, "errand" once.
+        for (title, project, tgs) in [
+            ("a", Some("work"), vec!["trip"]),
+            ("b", Some("work"), vec!["trip"]),
+            ("c", Some("home"), vec!["errand"]),
+        ] {
+            let project: Option<String> = project.map(String::from);
+            let tgs: Vec<String> = tgs.into_iter().map(String::from).collect();
+            let t = seed(NewTask {
+                title: title.into(),
+                ..Default::default()
+            });
+            let _ = ops::edit(
+                &s,
+                &t.id,
+                &crate::model::TaskPatch {
+                    project: project.map(crate::model::Patch::Set).unwrap_or_default(),
+                    tags: crate::model::Patch::Set(tgs),
+                    ..Default::default()
+                },
+            );
+        }
+        let gone = seed(NewTask {
+            title: "gone".into(),
+            ..Default::default()
+        });
+        let _ = ops::edit(
+            &s,
+            &gone.id,
+            &crate::model::TaskPatch {
+                project: crate::model::Patch::Set("work".into()),
+                tags: crate::model::Patch::Set(vec!["trip".into()]),
+                ..Default::default()
+            },
+        );
+        let _ = ops::archive(&s, &gone.id);
+        let tasks = s.all_tasks().unwrap();
+
+        assert_eq!(
+            projects(&tasks),
+            vec![("work".into(), 2), ("home".into(), 1)]
+        );
+        assert_eq!(
+            tags(&tasks),
+            vec![("trip".into(), 2), ("errand".into(), 1)],
+            "archived tasks don't tally"
+        );
+    }
+
+    #[test]
+    fn search_finds_tasks_by_id() {
+        let tasks = setup();
+        let target = &tasks[0];
+        let hits = search(&tasks, &target.id, false);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, target.id);
     }
 
     #[test]

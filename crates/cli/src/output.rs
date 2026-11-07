@@ -94,6 +94,21 @@ pub fn counts(cli: &Cli, counts: &[(TaskView, usize)]) {
     println!("{}", line.join("  "));
 }
 
+/// `intent projects` / `intent tags`: name + non-archived task count.
+pub fn name_counts(cli: &Cli, items: &[(String, usize)]) {
+    if cli.json {
+        let arr: Vec<serde_json::Value> = items
+            .iter()
+            .map(|(name, count)| serde_json::json!({"name": name, "count": count}))
+            .collect();
+        println!("{}", serde_json::Value::Array(arr));
+        return;
+    }
+    for (name, count) in items {
+        println!("{count} {name}");
+    }
+}
+
 fn row(t: &Task) -> String {
     let pri = match t.priority {
         intent_core::Priority::High => "!",

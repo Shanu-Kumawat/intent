@@ -35,6 +35,14 @@ mod tests {
     #[test]
     fn unique_enough() {
         let seen: HashSet<_> = (0..10_000).map(|_| new_id()).collect();
-        assert_eq!(seen.len(), 10_000, "collision in 10k ids is a bug");
+        // Birthday bound: 10k draws from 23^6 ≈ 1.5e8 expect ~0.34 random
+        // collisions, so requiring perfect uniqueness makes this test fail
+        // ~1 run in 3. A systematic generator bug produces far more than a
+        // handful.
+        assert!(
+            seen.len() >= 9_995,
+            "excessive id collisions: {}",
+            10_000 - seen.len()
+        );
     }
 }

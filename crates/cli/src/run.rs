@@ -214,6 +214,14 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
             let counts = intent_core::views::counts(&store.all_tasks()?, today());
             output::counts(cli, &counts);
         }
+        Cmd::Projects => {
+            let projects = intent_core::views::projects(&store.all_tasks()?);
+            output::name_counts(cli, &projects);
+        }
+        Cmd::Tags => {
+            let tags = intent_core::views::tags(&store.all_tasks()?);
+            output::name_counts(cli, &tags);
+        }
     }
     Ok(())
 }
