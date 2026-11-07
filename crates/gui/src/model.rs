@@ -97,6 +97,16 @@ pub enum SidebarItem {
     Tag(String),
 }
 
+/// Status line after a defer commit (SPEC §1.3: snooze now, park in
+/// Upcoming, land in Today on the date).
+fn defer_msg(value: Option<intent_core::Date>, today: intent_core::Date) -> String {
+    match value {
+        None => "defer cleared".to_string(),
+        Some(d) if d > today => format!("deferred → {d} · parked in Upcoming"),
+        Some(_) => "defer lifted · back in Today".to_string(),
+    }
+}
+
 /// How the editor was entered from the list (SPEC §4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorEntry {
@@ -543,29 +553,32 @@ impl GuiState {
                         }
                     }
                 };
-                let mut patch = TaskPatch::default();
-                let slot = match prompt.kind {
-                    PromptKind::Defer => &mut patch.defer_until,
-                    PromptKind::Due => &mut patch.due,
-                    _ => &mut patch.remind,
-                };
-                *slot = match value {
-                    Some(d) => Patch::Set(d),
-                    None => Patch::Clear,
-                };
                 if prompt.kind == PromptKind::Defer {
-                    // SPEC §1.3: snooze now, park in Upcoming, land in
-                    // Today on the date.
-                    match value {
-                        None => self.apply_patch(&id, patch, "defer cleared"),
-                        Some(d) if d > self.today => self.apply_patch(
-                            &id,
-                            patch,
-                            &format!("deferred → {d} · parked in Upcoming"),
-                        ),
-                        Some(_) => self.apply_patch(&id, patch, "defer lifted · back in Today"),
+                    // Defer routes through ops::defer: a snooze on a
+                    // done/archived task is rejected (SPEC §3) and the
+                    // prompt reopens with the reason.
+                    match ops::defer(&self.store, &id, value) {
+                        Ok(out) => {
+                            self.push_outcome(&out.change);
+                            self.follow_id = Some(id.clone());
+                            self.set_status(defer_msg(value, self.today));
+                            self.refresh();
+                        }
+                        Err(e) => {
+                            self.open_prompt_with_input(prompt.kind, Some(id), typed);
+                            self.prompt_error(&e.to_string());
+                        }
                     }
                 } else {
+                    let mut patch = TaskPatch::default();
+                    let slot = match prompt.kind {
+                        PromptKind::Due => &mut patch.due,
+                        _ => &mut patch.remind,
+                    };
+                    *slot = match value {
+                        Some(d) => Patch::Set(d),
+                        None => Patch::Clear,
+                    };
                     self.apply_patch(&id, patch, "date updated");
                 }
             }
@@ -795,17 +808,29 @@ impl GuiState {
                     };
                     match value {
                         Ok(d) => {
-                            let mut patch = TaskPatch::default();
-                            let slot = match cmd {
-                                "due" => &mut patch.due,
-                                "remind" => &mut patch.remind,
-                                _ => &mut patch.defer_until,
-                            };
-                            *slot = match d {
-                                Some(date) => Patch::Set(date),
-                                None => Patch::Clear,
-                            };
-                            self.apply_patch(&id, patch, "date updated");
+                            if cmd == "defer" {
+                                // Guarded by ops::defer (SPEC §3).
+                                match ops::defer(&self.store, &id, d) {
+                                    Ok(out) => {
+                                        self.push_outcome(&out.change);
+                                        self.follow_id = Some(id.clone());
+                                        self.set_status(defer_msg(d, self.today));
+                                        self.refresh();
+                                    }
+                                    Err(e) => self.set_status(e.to_string()),
+                                }
+                            } else {
+                                let mut patch = TaskPatch::default();
+                                let slot = match cmd {
+                                    "due" => &mut patch.due,
+                                    _ => &mut patch.remind,
+                                };
+                                *slot = match d {
+                                    Some(date) => Patch::Set(date),
+                                    None => Patch::Clear,
+                                };
+                                self.apply_patch(&id, patch, "date updated");
+                            }
                         }
                         Err(e) => self.set_status(e.to_string()),
                     }
@@ -915,6 +940,41 @@ impl GuiState {
                     }
                 }
             }
+            "rename-project" | "rename-tag" => {
+                let mut parts = rest.split_whitespace();
+                let (Some(old), Some(new)) = (parts.next(), parts.next()) else {
+                    self.set_status(format!("usage: :{cmd} <old> <new|none>"));
+                    return;
+                };
+                if parts.next().is_some() {
+                    self.set_status("names are single tokens (no spaces)");
+                    return;
+                }
+                let new = if is_clear_marker(new) {
+                    None
+                } else {
+                    Some(new)
+                };
+                let result = if cmd == "rename-project" {
+                    ops::rename_project(&self.store, old, new)
+                } else {
+                    ops::rename_tag(&self.store, old, new)
+                };
+                match result {
+                    Ok(changes) => {
+                        let n = changes.len();
+                        if !changes.is_empty() {
+                            self.push_undo_from(changes);
+                            self.refresh();
+                        }
+                        self.set_status(format!(
+                            "{cmd}: {n} task{} updated",
+                            if n == 1 { "" } else { "s" }
+                        ));
+                    }
+                    Err(e) => self.set_status(e.to_string()),
+                }
+            }
             "archive" | "unarchive" | "done" | "reopen" => {
                 let Some(id) = target_id else {
                     self.set_status("no task selected");
@@ -976,6 +1036,8 @@ impl GuiState {
         "project",
         "tag",
         "filter",
+        "rename-project",
+        "rename-tag",
         "organize",
         "archive",
         "unarchive",

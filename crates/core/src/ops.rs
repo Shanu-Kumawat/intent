@@ -216,6 +216,19 @@ pub fn organize(store: &Store, task_id: &str, project: Option<&str>) -> Result<O
 }
 
 pub fn defer(store: &Store, task_id: &str, date: Option<crate::dates::Date>) -> Result<OpOutcome> {
+    // A snooze only means something while the task can resurface — a date
+    // stored on a done/archived task would never be shown (§1.3). Clearing
+    // stays allowed on any status: it is pure cleanup, never invisible
+    // state.
+    if date.is_some() {
+        let task = store.get_task(task_id)?;
+        if task.status != Status::Active {
+            return Err(CoreError::BadValue(format!(
+                "cannot defer a {} task",
+                task.status
+            )));
+        }
+    }
     let patch = TaskPatch {
         defer_until: match date {
             Some(d) => Patch::Set(d),
@@ -290,6 +303,89 @@ pub fn archive_many(store: &Store, ids: &[String]) -> Result<Vec<RowChange>> {
     }
     tx.commit()?;
     Ok(changes)
+}
+
+/// Rename (or clear, `new = None`) a project on every task that carries
+/// it — one transaction, one undo entry. Renaming onto an existing name
+/// merges the two projects. Clearing keeps the tasks organized (§1.2 is
+/// a one-way flag).
+pub fn rename_project(store: &Store, old: &str, new: Option<&str>) -> Result<Vec<RowChange>> {
+    let new = validate_name(new, "project")?;
+    let tasks = store.all_tasks()?;
+    let ids: Vec<String> = tasks
+        .iter()
+        .filter(|t| t.project.as_deref() == Some(old))
+        .map(|t| t.id.clone())
+        .collect();
+    let tx = store.transaction()?;
+    let mut changes = Vec::new();
+    for id in ids {
+        let patch = TaskPatch {
+            project: match &new {
+                Some(n) => Patch::Set(n.clone()),
+                None => Patch::Clear,
+            },
+            ..Default::default()
+        };
+        changes.extend(edit_conn(&tx, &id, &patch)?.change);
+    }
+    tx.commit()?;
+    Ok(changes)
+}
+
+/// Rename (or remove) a tag across every task carrying it — same contract
+/// as `rename_project`.
+pub fn rename_tag(store: &Store, old: &str, new: Option<&str>) -> Result<Vec<RowChange>> {
+    let new = validate_name(new, "tag")?;
+    let tasks = store.all_tasks()?;
+    let ids: Vec<String> = tasks
+        .iter()
+        .filter(|t| t.tags.iter().any(|x| x == old))
+        .map(|t| t.id.clone())
+        .collect();
+    let tx = store.transaction()?;
+    let mut changes = Vec::new();
+    for id in ids {
+        // Re-read inside the transaction: concurrent writers may have
+        // changed the tags since all_tasks().
+        let task = get_task_conn(&tx, &id)?;
+        let mut tags = task.tags.clone();
+        match &new {
+            Some(n) => {
+                for t in tags.iter_mut() {
+                    if t == old {
+                        *t = n.clone();
+                    }
+                }
+            }
+            None => tags.retain(|t| t != old),
+        }
+        let patch = TaskPatch {
+            tags: Patch::Set(tags),
+            ..Default::default()
+        };
+        changes.extend(edit_conn(&tx, &id, &patch)?.change);
+    }
+    tx.commit()?;
+    Ok(changes)
+}
+
+fn validate_name(new: Option<&str>, kind: &str) -> Result<Option<String>> {
+    match new {
+        None => Ok(None),
+        Some(n) => {
+            let n = n.trim();
+            if n.is_empty() {
+                return Err(CoreError::BadValue(format!(
+                    "{kind} name must not be empty"
+                )));
+            }
+            if n.contains('\n') || n.contains('\r') {
+                return Err(CoreError::BadValue(format!("{kind} must be a single line")));
+            }
+            Ok(Some(n.to_string()))
+        }
+    }
 }
 
 /// Apply one recorded change in reverse (undo) or forward again (redo).
@@ -438,6 +534,104 @@ mod tests {
         assert_eq!(
             redone.defer_until.map(|d| d.to_string()),
             Some("2026-12-01".into())
+        );
+    }
+
+    #[test]
+    fn defer_rejected_on_done_and_archived() {
+        let s = store();
+        let t = mk(&s, "finished");
+        done(&s, &t.id).unwrap();
+        let err = defer(&s, &t.id, Some(Date(jiff::civil::date(2026, 12, 1)))).unwrap_err();
+        assert!(err.to_string().contains("done"), "{err}");
+        assert_eq!(err.code(), "bad_value");
+        // Clearing a stale snooze is still allowed (nothing to resurface).
+        assert!(defer(&s, &t.id, None).is_ok());
+        // A snoozed task that later gets done can be archived; deferring
+        // the archived task is rejected too.
+        archive(&s, &t.id).unwrap();
+        let err = defer(&s, &t.id, Some(Date(jiff::civil::date(2026, 12, 1)))).unwrap_err();
+        assert_eq!(err.code(), "bad_value");
+    }
+
+    #[test]
+    fn rename_project_moves_merges_and_clears() {
+        let s = store();
+        let a = mk(&s, "in work");
+        edit(
+            &s,
+            &a.id,
+            &TaskPatch {
+                project: Patch::Set("work".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let b = mk(&s, "in deep");
+        edit(
+            &s,
+            &b.id,
+            &TaskPatch {
+                project: Patch::Set("deep-work".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Rename: moves, keeps inbox flags and everything else.
+        let changes = rename_project(&s, "work", Some("deep-work")).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            s.get_task(&a.id).unwrap().project.as_deref(),
+            Some("deep-work")
+        );
+        assert!(!s.get_task(&a.id).unwrap().inbox, "project was already set");
+
+        // Merge: renaming onto an existing name is legal.
+        let changes = rename_project(&s, "deep-work", Some("deep-work")).unwrap();
+        assert_eq!(changes.len(), 0, "same name is a no-op");
+
+        // Clear: project goes away, tasks stay organized (§1.2 one-way).
+        let changes = rename_project(&s, "deep-work", None).unwrap();
+        assert_eq!(changes.len(), 2);
+        let t = s.get_task(&a.id).unwrap();
+        assert_eq!(t.project, None);
+        assert!(!t.inbox, "clearing a project does not re-inbox");
+
+        let err = rename_project(&s, "x", Some("  ")).unwrap_err();
+        assert_eq!(err.code(), "bad_value");
+    }
+
+    #[test]
+    fn rename_tag_moves_removes_and_undoes() {
+        let s = store();
+        let a = mk(&s, "tagged");
+        edit(
+            &s,
+            &a.id,
+            &TaskPatch {
+                tags: Patch::Set(vec!["trip".into(), "gear".into()]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let changes = rename_tag(&s, "trip", Some("travel")).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            s.get_task(&a.id).unwrap().tags,
+            vec!["travel".to_string(), "gear".to_string()]
+        );
+
+        rename_tag(&s, "gear", None).unwrap();
+        assert_eq!(s.get_task(&a.id).unwrap().tags, vec!["travel".to_string()]);
+
+        // Undo restores the row snapshot at rename time (the earlier
+        // tag-list, "gear" included) — session-undoable like any edit.
+        apply_change(&s, &changes[0].clone(), false).unwrap();
+        assert_eq!(
+            s.get_task(&a.id).unwrap().tags,
+            vec!["trip".to_string(), "gear".to_string()],
         );
     }
 

@@ -138,10 +138,24 @@ excluded. Searching the id finds the task directly.
 Per-view task counts.
 .TP
 .B intent projects
-Distinct projects with non-archived task counts, busiest first.
+Distinct projects with non-archived task counts, busiest first (natural
+name order: proj2 before proj10).
 .TP
 .B intent tags
 Distinct tags with non-archived task counts, busiest first.
+.TP
+.BI "intent rename-project " OLD NEW
+Rename a project on every task carrying it in one transaction.
+.B NEW
+is
+.B none
+or
+.B -
+to clear the project everywhere (tasks stay organized). Renaming onto an
+existing project name merges the two.
+.TP
+.BI "intent rename-tag " OLD NEW
+Same contract for tags; clearing removes the tag from every task.
 .TP
 .BI "intent completions " SHELL
 Print a completion script for

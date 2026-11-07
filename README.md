@@ -69,6 +69,7 @@ intent done <id>
 intent search passport --json         # machine-readable output for agents
 intent projects --json                # distinct projects + counts
 intent tags --json                    # distinct tags + counts
+intent rename-project work deep-work  # rename everywhere (merges; none clears)
 ```
 
 **GUI:**

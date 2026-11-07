@@ -174,9 +174,51 @@ fn enumerate_by(tasks: &[Task], keys: impl Fn(&Task) -> Vec<String>) -> Vec<(Str
         }
     }
     let mut out: Vec<(String, usize)> = tally.into_iter().collect();
-    // Busiest first, then alphabetical — stable and scannable.
-    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    // Busiest first, then natural name order — stable and scannable.
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| natural_cmp(&a.0, &b.0)));
     out
+}
+
+/// Natural name order: embedded digit runs compare as numbers
+/// (`proj2` before `proj10`), everything else byte-wise. Leading zeros
+/// break ties deterministically (`02` before `2`).
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut ra, mut rb) = (a, b);
+    loop {
+        match (ra.is_empty(), rb.is_empty()) {
+            (true, true) => return Ordering::Equal,
+            (true, false) => return Ordering::Less,
+            (false, true) => return Ordering::Greater,
+            (false, false) => {}
+        }
+        let (ca, na) = next_chunk(ra);
+        let (cb, nb) = next_chunk(rb);
+        let ord = if ca.starts_with(|c: char| c.is_ascii_digit()) {
+            let za = ca.trim_start_matches('0');
+            let zb = cb.trim_start_matches('0');
+            za.len()
+                .cmp(&zb.len())
+                .then_with(|| za.cmp(zb))
+                .then_with(|| ca.len().cmp(&cb.len()))
+        } else {
+            ca.cmp(cb)
+        };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+        ra = na;
+        rb = nb;
+    }
+}
+
+/// Split off the leading run of digits (or non-digits) from `s`.
+fn next_chunk(s: &str) -> (&str, &str) {
+    let digits = s.starts_with(|c: char| c.is_ascii_digit());
+    let end = s
+        .find(|c: char| c.is_ascii_digit() != digits)
+        .unwrap_or(s.len());
+    s.split_at(end)
 }
 
 /// Distinct projects over non-archived tasks, busiest first (sidebar, CLI).
@@ -546,6 +588,59 @@ mod tests {
         let hits = search(&tasks, &target.id, false);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, target.id);
+    }
+
+    #[test]
+    fn natural_name_order_digits_run_numerically() {
+        use std::cmp::Ordering;
+        assert_eq!(natural_cmp("proj2", "proj10"), Ordering::Less);
+        assert_eq!(natural_cmp("proj10", "proj2"), Ordering::Greater);
+        assert_eq!(natural_cmp("proj1", "proj1"), Ordering::Equal);
+        assert_eq!(
+            natural_cmp("2", "02"),
+            Ordering::Less,
+            "equal numbers tie-break by length (fewer chars first)"
+        );
+        assert_eq!(natural_cmp("a2b", "a2c"), Ordering::Less);
+        assert_eq!(natural_cmp("сеть", "日本語"), Ordering::Less);
+        let names = ["proj10", "proj1", "proj2"];
+        let mut v = names.to_vec();
+        v.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(v, vec!["proj1", "proj2", "proj10"]);
+    }
+
+    #[test]
+    fn enumeration_sorts_names_naturally() {
+        let s = Store::open_memory().unwrap();
+        for title in ["p10", "p2", "p1"] {
+            let t = ops::add(
+                &s,
+                NewTask {
+                    title: title.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .task
+            .unwrap();
+            let _ = ops::edit(
+                &s,
+                &t.id,
+                &crate::model::TaskPatch {
+                    project: crate::model::Patch::Set(format!("proj{title}")),
+                    ..Default::default()
+                },
+            );
+        }
+        let names: Vec<String> = projects(&s.all_tasks().unwrap())
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["projp1", "projp2", "projp10"],
+            "proj10 must not precede proj2"
+        );
     }
 
     #[test]

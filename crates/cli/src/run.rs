@@ -175,6 +175,14 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
             let out = ops::organize(&store, id.trim(), project.as_deref())?;
             output::one_task(cli, out.task.as_ref().unwrap(), "organized");
         }
+        Cmd::RenameProject { old, new } => {
+            let changes = ops::rename_project(&store, old.trim(), clear_or_some(new))?;
+            output::renamed(cli, "project", changes.len());
+        }
+        Cmd::RenameTag { old, new } => {
+            let changes = ops::rename_tag(&store, old.trim(), clear_or_some(new))?;
+            output::renamed(cli, "tag", changes.len());
+        }
         Cmd::Delete { id, force } => {
             let id = id.trim();
             if !*force {
@@ -228,6 +236,15 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
 
 fn usage(msg: &str) -> CoreError {
     CoreError::Usage(msg.to_string())
+}
+
+/// `none`/`-` means "clear the field" wherever a rename target is entered.
+fn clear_or_some(s: &str) -> Option<&str> {
+    if is_clear_marker(s) {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn parse_view(s: &str) -> Result<TaskView> {

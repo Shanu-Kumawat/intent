@@ -109,6 +109,18 @@ pub fn name_counts(cli: &Cli, items: &[(String, usize)]) {
     }
 }
 
+/// Bulk rename outcome (`intent rename-project` / `rename-tag`).
+pub fn renamed(cli: &Cli, kind: &str, n: usize) {
+    if cli.json {
+        println!("{}", serde_json::json!({ "renamed": n }));
+        return;
+    }
+    println!(
+        "{kind} renamed on {n} task{}",
+        if n == 1 { "" } else { "s" }
+    );
+}
+
 fn row(t: &Task) -> String {
     let pri = match t.priority {
         intent_core::Priority::High => "!",

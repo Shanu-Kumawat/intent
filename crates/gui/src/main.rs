@@ -274,6 +274,17 @@ fn sidebar_section_header(name: &str) -> gpui::Div {
         .child(name.to_string())
 }
 
+/// The overflow line under a capped section — hidden names stay visible
+/// as a count, and `:filter ·name` still reaches them.
+fn more_row(hidden: usize, glyph: &str, cmd: &str) -> gpui::Div {
+    div()
+        .px(px(S4))
+        .py(px(S2))
+        .text_size(px(SMALL))
+        .text_color(MUTED)
+        .child(format!("+{hidden} more ({glyph} via {cmd})"))
+}
+
 fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
     // Archived is alt-only (bare 5-9 start counts), so its hint says so.
     let items: Vec<(&str, TaskView)> = vec![
@@ -333,6 +344,9 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
             active,
         ));
     }
+    if state.projects.len() > 6 {
+        col = col.child(more_row(state.projects.len() - 6, "·name", ":filter ·"));
+    }
     col = col.child(sidebar_section_header("TAGS"));
     for (ix, (name, count)) in state.tags.iter().take(6).enumerate() {
         let active = state.filter.as_ref() == Some(&Filter::Tag(name.clone()));
@@ -345,6 +359,9 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
             *count,
             active,
         ));
+    }
+    if state.tags.len() > 6 {
+        col = col.child(more_row(state.tags.len() - 6, "#name", ":filter #"));
     }
 
     col = col.child(div().flex_1());
@@ -363,7 +380,7 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
 
 #[allow(clippy::too_many_arguments)]
 fn lens_row(
-    _state: &GuiState,
+    state: &GuiState,
     cx: &mut Context<Shell>,
     ns: &str,
     label: &str,
@@ -371,6 +388,14 @@ fn lens_row(
     count: usize,
     active: bool,
 ) -> gpui::Stateful<gpui::Div> {
+    // The active lens row shows visible/total: the count column is the
+    // non-archived total everywhere else, so a lensed "2/12" explains the
+    // short list instead of contradicting it.
+    let count_label = if active && !state.search_active() {
+        format!("{}/{}", state.rows.len(), count)
+    } else {
+        format!("{count}")
+    };
     let mut row = div()
         // Positional id: project/tag NAMES can collide after any mangling
         // (`!!` and `??` both sanitize to ""), so the id encodes the slot,
@@ -391,7 +416,7 @@ fn lens_row(
             .text_color(CHROME)
             .font_weight(gpui::FontWeight::BOLD);
     }
-    row.child(label.to_string()).child(format!("{count}"))
+    row.child(label.to_string()).child(count_label)
 }
 
 fn task_row(state: &GuiState, ix: usize) -> gpui::AnyElement {

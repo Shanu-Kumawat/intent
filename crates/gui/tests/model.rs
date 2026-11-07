@@ -1378,6 +1378,79 @@ fn capture_under_lens_reports_when_the_lens_hides_it() {
 }
 
 #[test]
+fn defer_prompt_rejects_done_tasks_and_stays_open() {
+    let mut f = fx();
+    seed(&mut f, &["finished", "other"]);
+    feed(&mut f, "x"); // done — cursor was on the newest ("other")
+    feed(&mut f, "4"); // Completed view: the done task is under the cursor
+    let done_id = f.state.rows[0].id.clone();
+    assert_eq!(f.state.rows.len(), 1);
+
+    feed(&mut f, "<space> d");
+    assert!(f.state.prompt.is_some());
+    type_prompt_text(&mut f, "+3d");
+    feed(&mut f, "<cr>");
+    assert!(
+        f.state.prompt.is_some(),
+        "rejected defer keeps the prompt open"
+    );
+    assert!(f.state.prompt.as_ref().unwrap().error.is_some());
+    assert_eq!(
+        f.state.store.get_task(&done_id).unwrap().defer_until,
+        None,
+        "no snooze stored on a done task"
+    );
+    // Clearing is still allowed (cleanup, not a snooze).
+    feed(&mut f, "<esc>");
+    feed(&mut f, "<space> d");
+    type_prompt_text(&mut f, "none");
+    feed(&mut f, "<cr>");
+    assert!(f.state.prompt.is_none());
+}
+
+#[test]
+fn rename_commands_move_projects_and_tags() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["one", "two"]);
+    intent_core::ops::edit(
+        &f.state.store,
+        &ids[1],
+        &intent_core::model::TaskPatch {
+            project: intent_core::model::Patch::Set("work".into()),
+            tags: intent_core::model::Patch::Set(vec!["trip".into()]),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "rename-project work deep");
+    feed(&mut f, "<cr>");
+    assert_eq!(
+        f.state.store.get_task(&ids[1]).unwrap().project.as_deref(),
+        Some("deep")
+    );
+
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "rename-tag trip none");
+    feed(&mut f, "<cr>");
+    assert!(
+        f.state.store.get_task(&ids[1]).unwrap().tags.is_empty(),
+        "clearing a tag removes it"
+    );
+
+    // Usage errors are messages, not crashes.
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "rename-project onearg");
+    feed(&mut f, "<cr>");
+    assert!(
+        f.state.status.contains("usage"),
+        "status was: {:?}",
+        f.state.status
+    );
+}
+
+#[test]
 fn space_space_opens_capture() {
     let mut f = fx();
     seed(&mut f, &["a"]);

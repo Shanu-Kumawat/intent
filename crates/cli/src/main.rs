@@ -135,6 +135,11 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Rename a project on every task carrying it (NEW = none/- to clear;
+    /// renaming onto an existing project merges the two)
+    RenameProject { old: String, new: String },
+    /// Rename (or remove) a tag on every task carrying it
+    RenameTag { old: String, new: String },
     /// Search all non-archived tasks (ANDed case-insensitive terms)
     Search {
         query: String,

@@ -201,6 +201,9 @@ intent defer ID DATE|none [--json]        (sets defer_until)
 intent prioritize ID none|low|medium|high [--json]
 intent archive ID [--json]       intent unarchive ID [--json]
 intent organize ID [--project P] [--json]
+intent rename-project OLD NEW [--json]    (NEW = none/- clears; renaming
+                                           onto an existing name merges)
+intent rename-tag OLD NEW [--json]        (same contract)
 intent delete ID [--force] [--json]       (see §3.1)
 intent search QUERY [--json] [--limit N]  (= list --query, all non-archived;
     terms also match the task id, so `intent search abc123` finds it directly)
@@ -221,6 +224,13 @@ Semantics notes:
   the session (§5).
 - Setting `--due`/`--remind`/`--project` on `add` implies leaving the inbox
   (§1.2). `--no-inbox` forces it.
+- `defer` on a done/archived task is a `bad_value` error (exit 4) — a snooze
+  on a task that can never resurface is invisible state. Clearing
+  (`none`/`-`) stays allowed on any status: it is pure cleanup.
+- `rename-project`/`rename-tag` touch every task carrying the name in one
+  transaction (one CLI invocation = one mutation, §2); renaming onto an
+  existing name merges. Clearing a project keeps tasks organized (§1.2 is
+  a one-way flag).
 - `edit` with no mutation flags is a usage error (exit 2).
 
 ---
@@ -383,6 +393,7 @@ command (no cursor task, empty list) is an error message, not a crash.
 :due <date|none>    :remind <date|none>    :defer <date|none>
 :project <name|none>  :tag +tag  :tag -tag
 :filter <·project|#tag|none>   apply/clear the lens (§4.3)
+:rename-project <old> <new|none>   :rename-tag <old> <new|none>   (§3)
 :organize           leave inbox (no project change)
 :archive :unarchive :done :reopen
 :delete             same as D (y/n confirm)

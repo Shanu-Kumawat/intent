@@ -170,6 +170,38 @@ c,out,_ = run("delete", aid, "--force", "--json")
 check("delete --force succeeds; JSON acknowledges", "§3", c==0 and json.loads(out).get("deleted") is True)
 c,_,e = run("defer", "zzzzzz", "+1d", "--json")
 check("defer on missing id: exit 3", "§3", c==3)
+# defer guard: a snooze on a done task is invisible state — rejected
+c,out,_ = run("add", "done no defer", "--json"); did=json.loads(out)["id"]
+run("done", did)
+c,_,e = run("defer", did, "+3d", "--json")
+ej = err_json(e)
+check("defer on done task: exit 4, code bad_value", "§3",
+      c==4 and ej and ej["code"]=="bad_value", e.strip())
+c,_,_ = run("defer", did, "none", "--json")
+check("defer clear (none) stays allowed on done", "§3", c==0)
+# rename-project: bulk move + merge + clear
+c,out,_ = run("add", "ren a", "--project", "fold", "--json"); rid1=json.loads(out)["id"]
+c,out,_ = run("add", "ren b", "--project", "fold", "--json"); rid2=json.loads(out)["id"]
+c,out,_ = run("add", "ren c", "--project", "keep", "--json")
+c,out,_ = run("rename-project", "fold", "keep", "--json")
+n = json.loads(out).get("renamed")
+check("rename-project echoes moved count", "§3", c==0 and n==2, str(out))
+c,projs,_ = jrun("projects", "--json")
+check("rename merges: fold gone, keep has 3", "§3",
+      not any(p["name"]=="fold" for p in projs)
+      and next(p["count"] for p in projs if p["name"]=="keep")==3, str(projs))
+c,out,_ = run("rename-project", "keep", "none", "--json")
+c,projs,_ = jrun("projects", "--json")
+check("rename to none clears the project everywhere", "§3",
+      not any(p["name"]=="keep" for p in projs), str(projs))
+# natural name order: proj10 must not precede proj2
+for nm in ("proj1","proj2","proj10"):
+    run("add", f"nat {nm}", "--project", nm)
+c,names,_ = jrun("projects", "--json")
+ord_names = [p["name"] for p in names]
+i1, i2, i10 = ord_names.index("proj1"), ord_names.index("proj2"), ord_names.index("proj10")
+check("projects listed in natural name order (proj2 < proj10)", "§3",
+      i1 < i2 < i10, str(ord_names))
 # mutating commands echo the resulting task
 c,out,_ = run("add", "echo check", "--json"); eid = json.loads(out)["id"]
 c,out,_ = run("done", eid, "--json")
