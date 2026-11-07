@@ -258,6 +258,21 @@ fn d_archives_and_space_d_unarchives() {
 }
 
 #[test]
+fn all_command_shows_everything_except_archived() {
+    let mut f = fx();
+    let ids = seed(&mut f, &["kept", "gone"]);
+    feed(&mut f, "d"); // archive ids[1] ("gone", newest first)
+    assert_eq!(f.state.rows.len(), 1);
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "all");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.view, intent_core::TaskView::All);
+    // §1.3: all = status != archived — every working task in one list.
+    assert_eq!(f.state.rows.len(), 1);
+    assert_eq!(f.state.rows[0].id, ids[0]);
+}
+
+#[test]
 fn capital_d_delete_is_two_stroke_and_undoable() {
     // First D arms the row (red); a second D on the same row deletes.
     let mut f = fx();

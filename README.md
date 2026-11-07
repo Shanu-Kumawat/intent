@@ -90,7 +90,7 @@ reloads within 2 seconds when the CLI (or an agent) changes something.
 | Keys | Action |
 |---|---|
 | `j` `k` `gg` `G` `ctrl-d/ctrl-u` | move |
-| `1`–`4` (`alt+1`–`4`) / `tab` | switch view / cycle views |
+| `1`–`4` (`alt+1`–`5`) / `tab` | switch view / cycle views (`alt+5` = archived) |
 | `o`, `space space`, `space c` | capture (inbox) |
 | `enter` / `i` / `a` | edit task (title + notes, full Vim editing; `ctrl+j`/`ctrl+k` switch fields) |
 | `x` | complete ⇄ reopen ⇄ revive |

@@ -142,14 +142,16 @@ impl Shell {
     fn dispatch_key(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let view_before = (self.state.cursor, self.state.rows.len());
         let ks = &event.keystroke;
-        // alt+1-4 switch views (alias of the bare 1-4, same habit as
-        // workspaces/tabs elsewhere).
+        // alt+1-5 switch views (alias of the bare 1-4 where one exists,
+        // same habit as workspaces/tabs elsewhere; Archived is alt-only
+        // because bare 5-9 start counts).
         if ks.modifiers.alt && !ks.modifiers.control && !ks.modifiers.shift {
             let view = match ks.key.as_str() {
                 "1" => Some(intent_core::TaskView::Inbox),
                 "2" => Some(intent_core::TaskView::Today),
                 "3" => Some(intent_core::TaskView::Upcoming),
                 "4" => Some(intent_core::TaskView::Completed),
+                "5" => Some(intent_core::TaskView::Archived),
                 _ => None,
             };
             if let Some(v) = view {
@@ -263,11 +265,13 @@ fn header(state: &GuiState) -> impl IntoElement {
 }
 
 fn sidebar(state: &GuiState) -> impl IntoElement {
-    let items: Vec<(u8, TaskView)> = vec![
-        (1, TaskView::Inbox),
-        (2, TaskView::Today),
-        (3, TaskView::Upcoming),
-        (4, TaskView::Completed),
+    // Archived is alt-only (bare 5-9 start counts), so its hint says so.
+    let items: Vec<(&str, TaskView)> = vec![
+        ("1", TaskView::Inbox),
+        ("2", TaskView::Today),
+        ("3", TaskView::Upcoming),
+        ("4", TaskView::Completed),
+        ("alt+5", TaskView::Archived),
     ];
     let mut col = div()
         .flex()
@@ -275,15 +279,15 @@ fn sidebar(state: &GuiState) -> impl IntoElement {
         .w(px(SIDEBAR_W))
         .border_r_2()
         .border_color(FG);
-    for (n, view) in items {
+    for (key, view) in items {
         // While a search is active no view claims focus: the search spans
         // all non-archived tasks, and pretending you're in TODAY while
         // Inbox rows show would contradict the sidebar's count.
         let active = state.view == view && !state.search_active();
         let count = state.view_counts.get(&view).copied().unwrap_or(0);
-        let label = format!("{n} {}", view.to_string().to_uppercase());
+        let label = format!("{key} {}", view.to_string().to_uppercase());
         let mut row = div()
-            .id(SharedString::from(format!("sb-{n}")))
+            .id(SharedString::from(format!("sb-{key}")))
             .flex()
             .justify_between()
             .px(px(S4))
@@ -836,7 +840,7 @@ fn help_overlay() -> gpui::AnyElement {
     let entries: &[(&str, &str)] = &[
         ("j k gg G", "move"),
         ("ctrl-d ctrl-u", "jump +-10 rows"),
-        ("1-4 alt+1-4", "switch view"),
+        ("1-4 alt+1-5", "switch view"),
         ("tab", "cycle views"),
         ("o SPC SPC c", "capture"),
         ("enter i a", "edit task"),

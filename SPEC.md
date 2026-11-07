@@ -280,7 +280,7 @@ Pending state is always visible, so waiting is safe.
 | `/`                | search prompt; enter → the list keeps showing every non-archived task, non-matching titles dim, and the cursor jumps to the first match (title/notes/project/tags, all ANDed terms, case-insensitive); `n`/`N` cycle matches forward/backward with wrap; `esc` clears back to the previous view and cursor |
 | `:`                | command prompt (§4.4)                                          |
 | `?`                | help overlay (full keymap; any key closes)                    |
-| `1`–`4`, `alt+1`–`alt+4` | switch view inbox/today/upcoming/completed (bare digits only with no pending count). Counts therefore always start with `5`–`9`; `5gg` is the smallest count-gg. |
+| `1`–`4`, `alt+1`–`alt+5` | switch view inbox/today/upcoming/completed; `alt+5` = archived (bare digits only with no pending count; bare `5`–`9` start counts, so archived has no bare key — `5gg` is the smallest count-gg) |
 | `tab` / `shift-tab`| next / previous view                                           |
 | `u` / `ctrl-r`     | undo / redo task operations (§5)                               |
 | `.`                | repeat last task operation (`x d > < + -` are repeatable), count replaces the original count |
@@ -357,7 +357,7 @@ Commands act on the cursor task unless stated. Executing an impossible
 command (no cursor task, empty list) is an error message, not a crash.
 
 ```
-:inbox :today :upcoming :completed :archived   switch views
+:inbox :today :upcoming :completed :archived :all   switch views
 :new [title] / :capture [title]        capture (empty title → capture prompt)
 :due <date|none>    :remind <date|none>    :defer <date|none>
 :project <name|none>  :tag +tag  :tag -tag

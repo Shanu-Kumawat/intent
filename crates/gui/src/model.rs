@@ -621,7 +621,7 @@ impl GuiState {
             .map(|e| e.task_id.clone())
             .or_else(|| self.cursor_task().map(|t| t.id.clone()));
         match cmd {
-            "inbox" | "today" | "upcoming" | "completed" | "archived" => {
+            "inbox" | "today" | "upcoming" | "completed" | "archived" | "all" => {
                 self.switch_view(TaskView::parse(cmd).expect("matched view"));
             }
             "new" | "capture" => {
@@ -800,6 +800,7 @@ impl GuiState {
         "upcoming",
         "completed",
         "archived",
+        "all",
         "new",
         "capture",
         "due",
