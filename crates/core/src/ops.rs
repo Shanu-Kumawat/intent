@@ -144,6 +144,9 @@ fn done_conn(conn: &Connection, task_id: &str) -> Result<OpOutcome> {
     let t = now();
     after.completed_at = Some(t);
     after.updated_at = t;
+    // A snooze has no meaning on a done task — drop it so a later reopen
+    // can never silently resnooze (§1.3).
+    after.defer_until = None;
     update_task_conn(conn, &after)?;
     Ok(OpOutcome::changed(before, after))
 }
@@ -160,6 +163,9 @@ fn reopen_conn(conn: &Connection, task_id: &str) -> Result<OpOutcome> {
     let mut after = before.clone();
     after.status = Status::Active;
     after.completed_at = None;
+    // Leave the stale snooze behind with the done state — a task reopened
+    // days later must never silently resnooze itself (§1.3).
+    after.defer_until = None;
     after.updated_at = now();
     update_task_conn(conn, &after)?;
     Ok(OpOutcome::changed(before, after))
@@ -176,6 +182,7 @@ fn archive_conn(conn: &Connection, task_id: &str) -> Result<OpOutcome> {
     }
     let mut after = before.clone();
     after.status = Status::Archived;
+    after.defer_until = None;
     after.updated_at = now();
     update_task_conn(conn, &after)?;
     Ok(OpOutcome::changed(before, after))
@@ -320,6 +327,14 @@ pub fn rename_project(store: &Store, old: &str, new: Option<&str>) -> Result<Vec
     let tx = store.transaction()?;
     let mut changes = Vec::new();
     for id in ids {
+        // Re-read inside the transaction and re-verify: a concurrent writer
+        // may have reassigned the project since all_tasks() — an
+        // unconditional Set would clobber their edit (rename_tag has the
+        // same guard).
+        let task = get_task_conn(&tx, &id)?;
+        if task.project.as_deref() != Some(old) {
+            continue;
+        }
         let patch = TaskPatch {
             project: match &new {
                 Some(n) => Patch::Set(n.clone()),
@@ -552,6 +567,31 @@ mod tests {
         archive(&s, &t.id).unwrap();
         let err = defer(&s, &t.id, Some(Date(jiff::civil::date(2026, 12, 1)))).unwrap_err();
         assert_eq!(err.code(), "bad_value");
+    }
+
+    #[test]
+    fn done_and_archive_drop_a_stale_snooze() {
+        let s = store();
+        let t = mk(&s, "snoozed then done");
+        defer(&s, &t.id, Some(Date(jiff::civil::date(2026, 12, 1)))).unwrap();
+        done(&s, &t.id).unwrap();
+        assert_eq!(
+            s.get_task(&t.id).unwrap().defer_until,
+            None,
+            "done leaves no snooze behind"
+        );
+        // Reopen must not silently resnooze the task.
+        reopen(&s, &t.id).unwrap();
+        let t = s.get_task(&t.id).unwrap();
+        assert_eq!(t.status, Status::Active);
+        assert_eq!(t.defer_until, None);
+
+        // The archive path drops it too (unarchive comes back clean).
+        defer(&s, &t.id, Some(Date(jiff::civil::date(2026, 12, 1)))).unwrap();
+        archive(&s, &t.id).unwrap();
+        assert_eq!(s.get_task(&t.id).unwrap().defer_until, None);
+        unarchive(&s, &t.id).unwrap();
+        assert_eq!(s.get_task(&t.id).unwrap().defer_until, None);
     }
 
     #[test]

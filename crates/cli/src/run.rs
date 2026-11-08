@@ -35,12 +35,15 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
                 project: match project.as_deref() {
                     None => None,
                     Some(p) if is_clear_marker(p) => None,
-                    Some(p) => Some(p.to_string()),
+                    // Trimmed at the boundary: " work " must not become a
+                    // phantom project the lens and rename can't see.
+                    Some(p) => Some(clean_name(p)),
                 },
                 tags: tags
                     .clone()
                     .unwrap_or_default()
                     .into_iter()
+                    .map(|t| clean_name(&t))
                     .filter(|t| !t.is_empty())
                     .collect(),
                 due: parse_opt_date(due.as_deref())?,
@@ -107,7 +110,7 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
                 patch.project = if is_clear_marker(p) {
                     Patch::Clear
                 } else {
-                    Patch::Set(p.clone())
+                    Patch::Set(clean_name(p))
                 };
             }
             let mut final_tags = tags.clone();
@@ -115,16 +118,18 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
                 final_tags = Some(store.get_task(id.trim())?.tags);
             }
             if let Some(t) = final_tags {
-                let mut t: Vec<String> = t.into_iter().filter(|x| !x.is_empty()).collect();
+                let mut t: Vec<String> = t.into_iter().map(|x| clean_name(&x)).collect();
+                t.retain(|x| !x.is_empty());
                 if let Some(add) = tag_add {
                     for a in add {
-                        if !t.contains(a) {
-                            t.push(a.clone());
+                        let a = clean_name(a);
+                        if !a.is_empty() && !t.contains(&a) {
+                            t.push(a);
                         }
                     }
                 }
                 if let Some(rm) = tag_rm {
-                    t.retain(|x| !rm.contains(x));
+                    t.retain(|x| !rm.iter().any(|r| r.trim() == x));
                 }
                 patch.tags = Patch::Set(t);
             }
@@ -169,7 +174,7 @@ pub fn dispatch(cli: &Cli) -> Result<()> {
                 if is_clear_marker(p) {
                     None
                 } else {
-                    Some(p.to_string())
+                    Some(clean_name(p))
                 }
             });
             let out = ops::organize(&store, id.trim(), project.as_deref())?;
@@ -245,6 +250,13 @@ fn clear_or_some(s: &str) -> Option<&str> {
     } else {
         Some(s)
     }
+}
+
+/// Project/tag names are trimmed at the CLI boundary — whitespace around a
+/// name must not fork it into a phantom the lens, rename, and enumeration
+/// can never see.
+fn clean_name(s: &str) -> String {
+    s.trim().to_string()
 }
 
 fn parse_view(s: &str) -> Result<TaskView> {

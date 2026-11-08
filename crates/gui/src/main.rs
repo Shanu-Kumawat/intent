@@ -305,7 +305,19 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
         // all non-archived tasks, and pretending you're in TODAY while
         // Inbox rows show would contradict the sidebar's count.
         let active = state.view == view && !state.search_active();
-        let count = state.view_counts.get(&view).copied().unwrap_or(0);
+        // A row's number predicts what activating it shows: with a lens
+        // active the view counts go through it too (§4.1); during a search
+        // the counts are the plain view totals.
+        let count = if state.search_active() {
+            state.view_counts.get(&view).copied().unwrap_or(0)
+        } else {
+            state
+                .lensed_counts
+                .get(&view)
+                .or_else(|| state.view_counts.get(&view))
+                .copied()
+                .unwrap_or(0)
+        };
         let label = format!("{key} {}", view.to_string().to_uppercase());
         let item = SidebarItem::View(view);
         let mut row = div()
@@ -333,7 +345,10 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
     // listed so the sidebar stays a fixed, scannable height.
     col = col.child(sidebar_section_header("PROJECTS"));
     for (ix, (name, count)) in state.projects.iter().take(6).enumerate() {
-        let active = state.filter.as_ref() == Some(&Filter::Project(name.clone()));
+        // Search overrides the lens (§4.1) — the highlight steps aside
+        // with it, exactly like the view rows.
+        let active =
+            state.filter.as_ref() == Some(&Filter::Project(name.clone())) && !state.search_active();
         col = col.child(lens_row(
             state,
             cx,
@@ -349,7 +364,8 @@ fn sidebar(state: &GuiState, cx: &mut Context<Shell>) -> impl IntoElement {
     }
     col = col.child(sidebar_section_header("TAGS"));
     for (ix, (name, count)) in state.tags.iter().take(6).enumerate() {
-        let active = state.filter.as_ref() == Some(&Filter::Tag(name.clone()));
+        let active =
+            state.filter.as_ref() == Some(&Filter::Tag(name.clone())) && !state.search_active();
         col = col.child(lens_row(
             state,
             cx,

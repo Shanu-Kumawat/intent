@@ -118,6 +118,20 @@ jrun("edit", sn3, "--due", "yesterday")
 jrun("defer", sn3, "yesterday")
 check("past-due task returns to today once its snooze lifts", "§1.3",
       "snooze lifted" in titles("today"), str(titles("today")))
+# completing drops the snooze — a reopen must never silently resnooze
+c, t, _ = jrun("add", "snooze dropped", "--json"); sd1 = t["id"]
+jrun("defer", sd1, "+5d")
+jrun("done", sd1)
+code, t, _ = jrun("show", sd1, "--json")
+check("done drops the snooze (reopen never resnoozes)", "§1.1/§1.3",
+      t["defer_until"] is None and t["status"]=="done", str(t["defer_until"]))
+# names are trimmed at the boundary — no phantom projects
+c, out, _ = run("add", "trim probe", "--project", " padded ", "--json")
+code, projs, _ = jrun("projects", "--json")
+check("project names are trimmed at input (no phantom names)", "§3",
+      any(p["name"]=="padded" for p in projs)
+      and not any(p["name"]!="padded" and p["name"].strip()!=p["name"] for p in projs),
+      str(projs))
 
 # sort: today due-ascending; resurfaced pure-deferred (undated) sorts last
 today_list = jrun("list", "today", "--json")[1]

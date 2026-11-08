@@ -487,6 +487,124 @@ fn space_t_prompt_adds_and_removes_tags_undoably() {
 }
 
 #[test]
+fn sidebar_view_counts_go_through_the_lens() {
+    use intent_gui::model::Filter;
+    let mut f = fx();
+    let ids = seed(&mut f, &["plain", "work task"]);
+    intent_core::ops::edit(
+        &f.state.store,
+        &ids[1],
+        &intent_core::model::TaskPatch {
+            due: intent_core::model::Patch::Set(f.state.today),
+            project: intent_core::model::Patch::Set("work".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // "work task" now lives in Today (due today); "plain" in Inbox.
+    f.state.refresh();
+    assert_eq!(f.state.view_counts[&intent_core::TaskView::Today], 1);
+
+    f.state.filter = Some(Filter::Project("work".into()));
+    f.state.refresh();
+    assert_eq!(
+        f.state.lensed_counts[&intent_core::TaskView::Today],
+        1,
+        "lensed count counts only the project's tasks"
+    );
+    assert_eq!(
+        f.state.lensed_counts[&intent_core::TaskView::Inbox],
+        0,
+        "the organized task is not in the lensed inbox"
+    );
+    // Global totals stay available for the no-lens case.
+    assert_eq!(f.state.view_counts[&intent_core::TaskView::Inbox], 1);
+}
+
+#[test]
+fn lens_toggle_disarms_delete_and_sidebar_click_respects_the_prompt() {
+    use intent_gui::model::SidebarItem;
+    let mut f = fx();
+    seed(&mut f, &["armed", "other"]);
+    feed(&mut f, "D"); // arms the row under the cursor (newest first)
+    let armed = f.state.delete_armed.clone().unwrap();
+
+    // A lens toggle must not leave an invisible armed row behind.
+    f.state
+        .activate_sidebar(SidebarItem::Project("work".into()));
+    assert_eq!(f.state.delete_armed, None, "lens disarms delete");
+    let _ = armed;
+
+    // While a prompt is open the sidebar must not reshape the list.
+    feed(&mut f, "<esc>");
+    feed(&mut f, ":");
+    let before = f.state.view;
+    f.state
+        .activate_sidebar(SidebarItem::View(intent_core::TaskView::Upcoming));
+    assert_eq!(f.state.view, before, "prompt owns the surface");
+    assert!(f.state.status.contains("prompt"));
+}
+
+#[test]
+fn lens_cycle_restores_the_remembered_cursor() {
+    use intent_gui::model::SidebarItem;
+    let mut f = fx();
+    let ids = seed(&mut f, &["a", "b", "c"]);
+    feed(&mut f, "j j"); // cursor row 2
+    assert_eq!(f.state.cursor, 2);
+
+    // An empty lens clamps to 0 — the remembered row must survive. The
+    // toggle goes through the real sidebar path so the cursor is stashed.
+    f.state
+        .activate_sidebar(SidebarItem::Project("nosuch".into()));
+    assert!(f.state.rows.is_empty());
+    assert!(f.state.rows.is_empty());
+    f.state.clear_lens();
+    assert_eq!(f.state.rows.len(), 3);
+    assert_eq!(
+        f.state.cursor, 2,
+        "the pre-lens remembered cursor is restored"
+    );
+    assert_eq!(f.state.rows[f.state.cursor].id, ids[0]);
+}
+
+#[test]
+fn rename_retargets_a_lens_on_the_renamed_name() {
+    use intent_gui::model::Filter;
+    let mut f = fx();
+    let ids = seed(&mut f, &["kept"]);
+    intent_core::ops::edit(
+        &f.state.store,
+        &ids[0],
+        &intent_core::model::TaskPatch {
+            project: intent_core::model::Patch::Set("work".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    f.state.filter = Some(Filter::Project("work".into()));
+    f.state.refresh();
+
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "rename-project work deep");
+    feed(&mut f, "<cr>");
+    assert_eq!(
+        f.state.filter,
+        Some(Filter::Project("deep".into())),
+        "lens follows the rename"
+    );
+    // The project edit organized the task — it lives in Upcoming now.
+    feed(&mut f, "3");
+    assert_eq!(f.state.rows.len(), 1, "still visible through the new lens");
+
+    // Clearing the name clears the lens with it.
+    feed(&mut f, ":");
+    type_prompt_text(&mut f, "rename-project deep none");
+    feed(&mut f, "<cr>");
+    assert_eq!(f.state.filter, None, "lens dies with the name");
+}
+
+#[test]
 fn shift_keys_move_the_snooze_of_a_deferred_task() {
     // SPEC §4.1: a snoozed task is parked on its defer date; `>`/`<` move
     // the snooze, not the deadline underneath it.
@@ -519,6 +637,16 @@ fn shift_keys_move_the_snooze_of_a_deferred_task() {
         f.state.store.get_task(&ids[0]).unwrap().defer_until,
         Some(today.add_days(1))
     );
+
+    // The snooze lifts: drop the defer date, the task resurfaces in Today.
+    intent_core::ops::defer(&f.state.store, &ids[0], None).unwrap();
+    feed(&mut f, "2");
+    assert_eq!(f.state.rows.len(), 1);
+    feed(&mut f, ".");
+    let t = f.state.store.get_task(&ids[0]).unwrap();
+    assert_eq!(t.defer_until, None, "no new snooze invented");
+    assert_eq!(t.due, Some(today), "due not moved by the stale repeat");
+    assert!(f.state.status.contains("snooze lifted"));
 }
 
 #[test]

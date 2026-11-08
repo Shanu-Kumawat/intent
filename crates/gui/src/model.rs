@@ -163,10 +163,23 @@ impl Clipboard for SharedClipboard {
 
 #[derive(Debug, Clone, Copy)]
 enum Repeatable {
-    Complete { n: usize },
-    Archive { n: usize },
-    ShiftDue { delta: i64, n: usize },
-    Priority { delta: i8, n: usize },
+    Complete {
+        n: usize,
+    },
+    Archive {
+        n: usize,
+    },
+    /// `snooze` records which move was made: a snooze shift must not
+    /// silently become a deadline shift when the snooze lifts.
+    ShiftDue {
+        delta: i64,
+        n: usize,
+        snooze: bool,
+    },
+    Priority {
+        delta: i8,
+        n: usize,
+    },
 }
 
 pub struct GuiState {
@@ -193,7 +206,13 @@ pub struct GuiState {
     /// a second `D` on the same row deletes, anything else disarms.
     pub delete_armed: Option<String>,
     pub view_counts: BTreeMap<TaskView, usize>,
+    /// Per-view counts through the active lens — a sidebar row's number
+    /// must predict what activating it shows (§4.1). Empty when no lens.
+    pub lensed_counts: BTreeMap<TaskView, usize>,
     cursors: BTreeMap<TaskView, usize>,
+    /// Remembered per-view cursor stashed while a lens narrows the view;
+    /// restored when the lens clears (§2: view state survives).
+    lens_saved_cursor: Option<(TaskView, usize)>,
     follow_id: Option<String>,
     /// Task id under the cursor when a search opened; restored on esc.
     pre_search_task: Option<String>,
@@ -231,6 +250,8 @@ impl GuiState {
             search_matches: Vec::new(),
             delete_armed: None,
             view_counts: BTreeMap::new(),
+            lensed_counts: BTreeMap::new(),
+            lens_saved_cursor: None,
             cursors: BTreeMap::new(),
             follow_id: None,
             pre_search_task: None,
@@ -261,6 +282,21 @@ impl GuiState {
         self.view_counts = counts(&all, self.today).into_iter().collect();
         self.projects = projects(&all);
         self.tags = core_tags(&all);
+        // While a lens is active the sidebar's view numbers go through it
+        // too: a row's count predicts what activating it shows (§4.1).
+        self.lensed_counts = match (&self.filter, &self.search_query) {
+            (Some(_), None) => intent_core::model::ALL_VIEWS
+                .iter()
+                .map(|v| {
+                    let n = for_view(&all, *v, self.today)
+                        .into_iter()
+                        .filter(|t| self.filter.as_ref().unwrap().matches(t))
+                        .count();
+                    (*v, n)
+                })
+                .collect(),
+            _ => BTreeMap::new(),
+        };
         // Vim-style search: the list keeps showing tasks (the whole
         // non-archived set), the cursor jumps between matching rows.
         let mut rows = match &self.search_query {
@@ -284,7 +320,11 @@ impl GuiState {
         } else {
             self.cursor = self.cursor.min(rows.len().saturating_sub(1));
         }
-        self.cursors.insert(self.view, self.cursor);
+        // Search indices belong to the All-view row set — never record them
+        // under the real view's key (§2: per-view cursors survive).
+        if self.search_query.is_none() {
+            self.cursors.insert(self.view, self.cursor);
+        }
         self.rows = rows;
         self.search_matches = match &self.search_query {
             Some(q) => {
@@ -310,6 +350,9 @@ impl GuiState {
         match self.store.data_version() {
             Ok(v) if v != self.data_version => {
                 self.data_version = v;
+                // Rows are about to shift under us; an armed row must not
+                // survive a reload it may not survive visibly.
+                self.delete_armed = None;
                 // Cursor follows the task id across the reload (SPEC §2),
                 // not the row index.
                 self.follow_id = self.cursor_task().map(|t| t.id.clone());
@@ -964,6 +1007,25 @@ impl GuiState {
                     Ok(changes) => {
                         let n = changes.len();
                         if !changes.is_empty() {
+                            // A lens on the renamed name would go stale —
+                            // retarget it so the view follows the rename
+                            // (and dies with the name if it was cleared).
+                            let on_renamed = match (&cmd, &self.filter) {
+                                (_, Some(Filter::Project(p))) if cmd == "rename-project" => {
+                                    p == old
+                                }
+                                (_, Some(Filter::Tag(t))) if cmd == "rename-tag" => t == old,
+                                _ => false,
+                            };
+                            if on_renamed {
+                                self.filter = new.map(|n| {
+                                    if cmd == "rename-project" {
+                                        Filter::Project(n.to_string())
+                                    } else {
+                                        Filter::Tag(n.to_string())
+                                    }
+                                });
+                            }
                             self.push_undo_from(changes);
                             self.refresh();
                         }
@@ -1260,8 +1322,14 @@ impl GuiState {
         self.set_status("");
     }
 
-    /// Sidebar activation (click): views switch, lenses toggle.
+    /// Sidebar activation (click): views switch, lenses toggle. The prompt
+    /// owns the keys and the surface (§4 precedence) — a click must not
+    /// reshape the list behind it.
     pub fn activate_sidebar(&mut self, item: SidebarItem) {
+        if self.prompt.is_some() {
+            self.set_status("esc closes the prompt first");
+            return;
+        }
         match item {
             SidebarItem::View(v) => self.switch_view(v),
             SidebarItem::Project(p) => self.toggle_lens(Filter::Project(p)),
@@ -1274,6 +1342,20 @@ impl GuiState {
         if self.filter.as_ref() == Some(&f) {
             self.clear_lens();
         } else {
+            // Same surface contract as switch_view (§4.1/§4.2): the lens
+            // reshapes the list, so the editor closes and an armed row is
+            // disarmed — an arm must never outlive the row it armed.
+            if self.editor.is_some() {
+                self.close_editor();
+            }
+            self.delete_armed = None;
+            if self.filter.is_none() {
+                self.lens_saved_cursor = self
+                    .cursors
+                    .get(&self.view)
+                    .copied()
+                    .map(|c| (self.view, c));
+            }
             self.filter = Some(f);
             self.follow_id = self.cursor_task().map(|t| t.id.clone());
             self.refresh();
@@ -1284,9 +1366,19 @@ impl GuiState {
         }
     }
 
-    fn clear_lens(&mut self) {
+    pub fn clear_lens(&mut self) {
         self.filter = None;
-        self.follow_id = self.cursor_task().map(|t| t.id.clone());
+        self.delete_armed = None;
+        self.follow_id = None;
+        if let Some((view, c)) = self.lens_saved_cursor.take() {
+            // The lens-clamped index never enters the map; restore what the
+            // view remembered before the lens narrowed it (§2) — and put
+            // the cursor back there now, not on the next view switch.
+            self.cursors.insert(view, c);
+            if view == self.view {
+                self.cursor = c;
+            }
+        }
         self.refresh();
         self.set_status("lens cleared");
     }
@@ -1325,8 +1417,12 @@ impl GuiState {
         let target = (self.cursor as isize + n).clamp(0, max);
         self.cursor = target as usize;
         // Plain navigation is remembered per view (SPEC §2: unfocused view
-        // state survives) — refresh alone would leave the map stale.
-        self.cursors.insert(self.view, self.cursor);
+        // state survives) — refresh alone would leave the map stale. While
+        // searching the rows are the All-view set; those indices belong to
+        // no view.
+        if self.search_query.is_none() {
+            self.cursors.insert(self.view, self.cursor);
+        }
     }
 
     fn pending_is_count_only(&self) -> bool {
@@ -1844,7 +1940,11 @@ impl GuiState {
                     ..Default::default()
                 };
                 self.apply_patch(&task.id, patch, "defer date shifted");
-                self.last_op = Some(Repeatable::ShiftDue { delta, n: count });
+                self.last_op = Some(Repeatable::ShiftDue {
+                    delta,
+                    n: count,
+                    snooze: true,
+                });
             }
             return;
         }
@@ -1865,7 +1965,11 @@ impl GuiState {
             return;
         }
         self.apply_patch(&task.id, patch, "due shifted");
-        self.last_op = Some(Repeatable::ShiftDue { delta, n: count });
+        self.last_op = Some(Repeatable::ShiftDue {
+            delta,
+            n: count,
+            snooze: false,
+        });
     }
 
     fn bump_priority(&mut self, delta: i8, count: usize) {
@@ -1953,8 +2057,19 @@ impl GuiState {
             Some(Repeatable::Archive { n }) => {
                 self.archive_range(if had_count { count } else { n })
             }
-            Some(Repeatable::ShiftDue { delta, n }) => {
-                self.shift_due(delta, if had_count { count } else { n })
+            Some(Repeatable::ShiftDue { delta, n, snooze }) => {
+                // A repeated snooze-shift must not quietly turn into a
+                // deadline shift (or invent a due date) once the snooze
+                // has lifted.
+                let still_snoozed = self
+                    .cursor_task()
+                    .map(|t| t.is_snoozed(self.today))
+                    .unwrap_or(false);
+                if snooze && !still_snoozed {
+                    self.set_status("snooze lifted — nothing to repeat");
+                } else {
+                    self.shift_due(delta, if had_count { count } else { n })
+                }
             }
             Some(Repeatable::Priority { delta, n }) => {
                 self.bump_priority(delta, if had_count { count } else { n })

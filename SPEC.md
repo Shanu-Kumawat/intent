@@ -59,7 +59,9 @@ Dates are **local calendar dates** (`YYYY-MM-DD`). Timestamps are RFC 3339 UTC.
 - **Deferral is not a status.** It is the `defer_until` date; a deferred task
   is still `active`. While `defer_until` is in the future the task is
   **snoozed**: it appears in no working view (it parks in Upcoming, §1.3) and
-  lands in Today on the date — defer means "see this again on".
+  lands in Today on the date — defer means "see this again on". Completing
+  or archiving a task drops its snooze: a reopened task never silently
+  resnoozes itself.
 
 ### 1.2 Inbox semantics
 
@@ -98,6 +100,10 @@ Sort orders:
 - `upcoming`: dated ascending (by earliest of due/remind/defer), undated last,
   then priority, then oldest
 - `completed` / `archived`: newest first
+
+One deliberate overlap: a **resurfaced** pure-deferred task that is still in
+the inbox appears in both Inbox (unprocessed) and Today (demands attention) —
+the view counts may therefore sum to more than the number of tasks.
 
 ### 1.4 Date input (shared by CLI and GUI prompts)
 
@@ -224,6 +230,9 @@ Semantics notes:
   the session (§5).
 - Setting `--due`/`--remind`/`--project` on `add` implies leaving the inbox
   (§1.2). `--no-inbox` forces it.
+- Project/tag names are **trimmed at every entry point** (CLI flags, GUI
+  prompts) — whitespace can never fork a name into a phantom the lens,
+  rename, and enumeration can't see.
 - `defer` on a done/archived task is a `bad_value` error (exit 4) — a snooze
   on a task that can never resurface is invisible state. Clearing
   (`none`/`-`) stays allowed on any status: it is pure cleanup.
@@ -318,6 +327,12 @@ message and clear the pending state — never a silent no-op.
 The list column carries the view's name and its task count above the rows
 (while searching: the live match count — the search spans all non-archived
 tasks, so no view is claimed as active in the sidebar).
+
+The sidebar's numbers always predict what activating a row shows: with a
+lens active, the view counts go through it too (INBOX 2/5 means the lensed
+inbox holds 2 of 5), and the active lens row shows `visible/total`. While a
+search overrides the rows, the lens highlight steps aside exactly like the
+view highlight. Sidebar clicks never reshape the list behind an open prompt.
 
 ### 4.2 Editor
 
